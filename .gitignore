@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+
+# Build output from the firmware examples; the prebuilt .bin files are committed
+# deliberately and are not covered by this.
+assets/firmware/build/

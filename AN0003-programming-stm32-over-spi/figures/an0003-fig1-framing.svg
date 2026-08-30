@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 322" width="640" height="322"
+     font-family="Inter, 'Segoe UI', system-ui, Arial, sans-serif">
+
+  <rect x="0" y="0" width="640" height="322" fill="#FFFFFF"/>
+
+  <text x="320" y="16" text-anchor="middle" font-size="12.5" font-weight="600" fill="#111827">
+    What the host clocks in after an acknowledgement
+  </text>
+
+  <!-- span above the cells: the busy padding, ending in the lead dummy -->
+  <text x="180" y="38" text-anchor="middle" font-size="10.5" fill="#92400E">
+    busy padding, variable length; the last byte is the lead dummy
+  </text>
+  <path d="M76 46 L76 42 L256 42 L256 46" fill="none" stroke="#B45309" stroke-width="1"/>
+
+  <!-- the byte cells -->
+  <rect x="40"  y="50" width="36" height="34" rx="3" fill="#DBEAFE" stroke="#1557F9"/>
+  <text x="58"  y="72" text-anchor="middle" font-size="12" font-weight="600" fill="#1557F9">79</text>
+
+  <rect x="76"  y="50" width="36" height="34" rx="3" fill="#FEF3C7" stroke="#F59E0B"/>
+  <text x="94"  y="72" text-anchor="middle" font-size="12" fill="#92400E">A5</text>
+  <rect x="112" y="50" width="36" height="34" rx="3" fill="#FEF3C7" stroke="#F59E0B"/>
+  <text x="130" y="72" text-anchor="middle" font-size="12" fill="#92400E">A5</text>
+  <rect x="148" y="50" width="36" height="34" rx="3" fill="#FEF3C7" stroke="#F59E0B"/>
+  <text x="166" y="72" text-anchor="middle" font-size="12" fill="#92400E">A5</text>
+  <rect x="184" y="50" width="36" height="34" rx="3" fill="#FEF3C7" stroke="#F59E0B"/>
+  <text x="202" y="72" text-anchor="middle" font-size="12" fill="#92400E">A5</text>
+  <rect x="220" y="50" width="36" height="34" rx="3" fill="#FDE9BC" stroke="#B45309"
+        stroke-dasharray="3 2"/>
+  <text x="238" y="72" text-anchor="middle" font-size="12" fill="#92400E">A5</text>
+
+  <rect x="256" y="50" width="36" height="34" rx="3" fill="#DFEFED" stroke="#1F6F6B"/>
+  <text x="274" y="72" text-anchor="middle" font-size="12" font-weight="700" fill="#155E5A">A5</text>
+  <rect x="292" y="50" width="36" height="34" rx="3" fill="#DFEFED" stroke="#1F6F6B"/>
+  <text x="310" y="72" text-anchor="middle" font-size="12" fill="#155E5A">3C</text>
+  <rect x="328" y="50" width="36" height="34" rx="3" fill="#DFEFED" stroke="#1F6F6B"/>
+  <text x="346" y="72" text-anchor="middle" font-size="12" fill="#155E5A">91</text>
+  <rect x="364" y="50" width="36" height="34" rx="3" fill="#DFEFED" stroke="#1F6F6B"/>
+  <text x="382" y="72" text-anchor="middle" font-size="12" font-weight="700" fill="#155E5A">A5</text>
+  <rect x="400" y="50" width="36" height="34" rx="3" fill="#DFEFED" stroke="#1F6F6B"/>
+  <text x="418" y="72" text-anchor="middle" font-size="12" fill="#155E5A">2E</text>
+  <rect x="436" y="50" width="36" height="34" rx="3" fill="#DFEFED" stroke="#1F6F6B"/>
+  <text x="454" y="72" text-anchor="middle" font-size="12" fill="#155E5A">6D</text>
+
+  <rect x="472" y="50" width="36" height="34" rx="3" fill="#FEF3C7" stroke="#F59E0B"/>
+  <text x="490" y="72" text-anchor="middle" font-size="12" fill="#92400E">A5</text>
+  <rect x="508" y="50" width="36" height="34" rx="3" fill="#FEF3C7" stroke="#F59E0B"/>
+  <text x="526" y="72" text-anchor="middle" font-size="12" fill="#92400E">A5</text>
+
+  <!-- where each approach believes the reply starts -->
+  <path d="M274 88 L268 98 L280 98 Z" fill="#1557F9"/>
+  <path d="M310 88 L304 98 L316 98 Z" fill="#B91C1C"/>
+
+  <!-- span below the cells: the reply itself -->
+  <path d="M256 104 L256 108 L472 108 L472 104" fill="none" stroke="#1F6F6B" stroke-width="1"/>
+  <text x="364" y="122" text-anchor="middle" font-size="10.5" fill="#155E5A">
+    the reply: exactly the number of bytes asked for, and A5 here is data
+  </text>
+
+  <!-- the wrong approach -->
+  <rect x="40" y="140" width="560" height="64" rx="5" fill="#F8E3E1" stroke="#B91C1C"/>
+  <path d="M62 154 L56 164 L68 164 Z" fill="#B91C1C"/>
+  <text x="80" y="163" font-size="11.5" font-weight="600" fill="#B91C1C">
+    Skipping A5 to find where the reply starts
+  </text>
+  <text x="80" y="181" font-size="10.5" fill="#7F1D1D">
+    Begins at the first byte that is not A5, so it starts one cell too far in and
+  </text>
+  <text x="80" y="195" font-size="10.5" fill="#7F1D1D">
+    loses every reply byte that was A5. On an all-A5 block it never starts at all.
+  </text>
+
+  <!-- the right approach -->
+  <rect x="40" y="218" width="560" height="64" rx="5" fill="#DFEFED" stroke="#1F6F6B"/>
+  <path d="M62 232 L56 242 L68 242 Z" fill="#1557F9"/>
+  <text x="80" y="241" font-size="11.5" font-weight="600" fill="#155E5A">
+    Counting from the acknowledgement
+  </text>
+  <text x="80" y="259" font-size="10.5" fill="#134E4A">
+    Stop clocking at the ACK, pause so the target loads, then clock exactly the
+  </text>
+  <text x="80" y="273" font-size="10.5" fill="#134E4A">
+    number of bytes expected and filter nothing. A5 in the reply is kept.
+  </text>
+
+  <text x="320" y="306" text-anchor="middle" font-size="10" fill="#6B7280">
+    The target cannot send without being clocked, so pausing leaves the reply waiting in its transmit register.
+  </text>
+</svg>
