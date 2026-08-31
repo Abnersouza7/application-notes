@@ -241,14 +241,35 @@ class Bus:
                 "maxIbiPayloadLength": payload_length,
             })
 
+    def stop_ibis(self, address, attempts=4, settle=0.2, window=0.5):
+        """Disable the target's IBI and confirm it actually stopped.
+
+        A single direct DISEC is not always enough. Measured over repeated
+        runs of the feature battery, roughly one attempt in six left a 50 Hz
+        stream still arriving, while 45 consecutive attempts at 25, 50 and
+        100 Hz with no other traffic never failed once. So it is not simply a
+        function of interrupt rate, and rather than assume the command took,
+        this verifies and retries.
+
+        Returns the number of attempts used, or None if the stream never
+        stopped, so callers can report the retry rather than hide it.
+        """
+        from binhosupernova.commands.i3c.definitions import DISEC
+        for attempt in range(1, attempts + 1):
+            self.try_call(self.device.i3cDirectDISEC, address, [DISEC.DISINT])
+            time.sleep(settle)
+            self.drain_ibis()
+            if not self.collect_ibis(window):
+                return attempt
+        return None
+
     def quiesce(self, address):
-        """Disable the target's IBI so a run starts from a known state.
+        """Put the target in a known state before a run starts.
 
         ENEC state survives the host program exiting, so without this a second
         run of an example sees interrupts it never asked for.
         """
-        from binhosupernova.commands.i3c.definitions import DISEC
-        self.try_call(self.device.i3cDirectDISEC, address, [DISEC.DISINT])
+        self.stop_ibis(address)
         self.drain_ibis()
 
     # -- register access ---------------------------------------------------
@@ -356,6 +377,14 @@ class Profile:
     def clear_interrupt(self, bus, address):
         """Called after each IBI. Only some parts need it; default is nothing."""
         return None
+
+    def interrupt_mode(self):
+        """How this part's interrupt is configured, for reporting.
+
+        Latched and pulsed are BMP58x concepts. The BMI323 has no equivalent
+        setting, so saying "pulsed" about it would be inventing a mode.
+        """
+        return "the part's default configuration"
 
     def expected_ibi_rate(self):
         return None
@@ -566,6 +595,10 @@ class Bmp58x(Profile):
             value, _ = bus.read_reg(address, self.INT_STATUS, self)
             return value
         return None
+
+    def interrupt_mode(self):
+        return ("latched, re-armed by the host reading INT_STATUS"
+                if self.latched else "pulsed")
 
     def expected_ibi_rate(self):
         return self.ODR_HZ
@@ -967,12 +1000,17 @@ def probe_ibi(bus, address, profile, seconds=3.0):
                     f"no IBIs in {elapsed:.2f} s after "
                     f"{response.get('result') if ok else response}"))
 
-    bus.try_call(bus.device.i3cDirectDISEC, address, [DISEC.DISINT])
-    time.sleep(0.2)
-    bus.drain_ibis()
-    after = len(bus.collect_ibis(1.0))
-    out.append(("DISEC stops them", SUPPORTED if after == 0 else UNDETERMINED,
-                f"{after} in 1.0 s after DISEC"))
+    attempts = bus.stop_ibis(address)
+    if attempts == 1:
+        out.append(("DISEC stops them", SUPPORTED,
+                    "the stream stopped after one DISEC"))
+    elif attempts:
+        out.append(("DISEC stops them", SUPPORTED,
+                    f"the stream stopped, but only after {attempts} DISEC "
+                    f"attempts; a single one is not always enough"))
+    else:
+        out.append(("DISEC stops them", UNDETERMINED,
+                    "the stream was still arriving after four DISEC attempts"))
 
     hot_join = any(n.get("command", "").upper().find("HJ") >= 0
                    for n in got)
@@ -1157,11 +1195,8 @@ def cmd_ibi(args):
         bus.quiesce(address)
         bus.accept_ibis(address)
         profile.start_stream(bus, address, route_ibi=True)
-        latched = getattr(profile, "latched", False)
-        mode = ("latched, re-armed by the host reading the status register"
-                if latched else "pulsed")
         print(f"{profile.name} at 0x{address:02X}: interrupt routed to the I3C "
-              f"IBI, {mode}")
+              f"IBI, {profile.interrupt_mode()}")
         bus.drain_ibis()
         bus.try_call(bus.device.i3cDirectENEC, address, [ENEC.ENINT])
 
@@ -1193,7 +1228,13 @@ def cmd_ibi(args):
         print("  the rate is comparable with the configured rate; individual "
               "arrival times are not, because USB coalesces them")
 
-        bus.try_call(bus.device.i3cDirectDISEC, address, [DISEC.DISINT])
+        attempts = bus.stop_ibis(address)
+        if attempts is None:
+            print("  warning: the interrupts were still arriving after four "
+                  "DISEC attempts")
+        elif attempts > 1:
+            print(f"  the interrupts stopped after {attempts} DISEC attempts, "
+                  f"not one")
         profile.stop_stream(bus, address)
     return 0
 
@@ -1255,20 +1296,19 @@ def cmd_rates(args):
 
     print(f"method: {args.iterations} consecutive reads of the chip id "
           f"register must all return the expected value with no error.")
-    print(f"a rate passes only if every iteration succeeds.\n")
+    print("a rate passes only if every iteration succeeds.")
+    print("the two rates are not independent: the adapter rejects some "
+          "combinations as an")
+    print("invalid frequency pair, so the open-drain sweep is run against the "
+          "fastest")
+    print("push-pull rate that passed rather than against the default.\n")
 
-    best = {}
-    for group, names, fixed in (
-            ("push-pull", push_pull_names, {"open_drain": args.open_drain}),
-            ("open-drain", open_drain_names, {"push_pull": args.push_pull})):
+    def sweep(group, names, settings_for):
+        results = {}
         print(f"  {group}")
         for name in names:
-            settings = dict(push_pull=args.push_pull,
-                            open_drain=args.open_drain, drive=args.drive)
-            settings.update(fixed)
-            settings[group.replace("-", "_")] = name
-            errors = 0
-            bad = 0
+            settings = settings_for(name)
+            errors = bad = 0
             try:
                 with Bus(serial=args.serial, verbose=args.verbose) as bus:
                     bus.configure(voltage_mv=args.voltage, **settings)
@@ -1282,19 +1322,51 @@ def cmd_rates(args):
                         except MemsError:
                             errors += 1
             except MemsError as exc:
-                print(f"    {name:32s} could not run: {str(exc)[:50]}")
+                message = str(exc)
+                if "frequency pair" in message:
+                    results[name] = "not tested"
+                    print(f"    {name:32s} not tested: the adapter rejected this "
+                          f"pairing")
+                else:
+                    results[name] = "not tested"
+                    print(f"    {name:32s} not tested: {message[:60]}")
                 continue
-            ok = errors == 0 and bad == 0
-            if ok:
-                best[group] = name
-            print(f"    {name:32s} "
-                  f"{'pass' if ok else f'fail ({errors} errors, {bad} wrong)'}")
+            if errors == 0 and bad == 0:
+                results[name] = "pass"
+                print(f"    {name:32s} pass")
+            else:
+                results[name] = "fail"
+                print(f"    {name:32s} fail ({errors} errors, {bad} wrong values)")
         print()
+        return results
 
-    for group, name in best.items():
-        print(f"  highest {group} rate passing {args.iterations} iterations: {name}")
-    if not best:
-        print("  no rate passed, which is a result worth reporting as it stands")
+    push_pull_results = sweep(
+        "push-pull", push_pull_names,
+        lambda name: dict(push_pull=name, open_drain="OPEN_DRAIN_100_KHZ",
+                          drive=args.drive))
+    best_push_pull = next((name for name in reversed(push_pull_names)
+                           if push_pull_results.get(name) == "pass"),
+                          args.push_pull)
+
+    open_drain_results = sweep(
+        "open-drain", open_drain_names,
+        lambda name: dict(push_pull=best_push_pull, open_drain=name,
+                          drive=args.drive))
+
+    print(f"  method detail: push-pull swept at open drain 100 kHz; "
+          f"open-drain swept at push-pull {best_push_pull}")
+    for group, results in (("push-pull", push_pull_results),
+                           ("open-drain", open_drain_results)):
+        passed = [n for n, r in results.items() if r == "pass"]
+        untested = [n for n, r in results.items() if r == "not tested"]
+        if passed:
+            print(f"  highest {group} rate passing {args.iterations} "
+                  f"iterations: {passed[-1]}")
+        else:
+            print(f"  no {group} rate passed, which is a result as it stands")
+        if untested:
+            # Never let a bounded sweep read as full coverage.
+            print(f"    not tested at all: {', '.join(untested)}")
     return 0
 
 
