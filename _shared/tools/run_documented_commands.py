@@ -51,7 +51,43 @@ GOLDEN_DIR = os.path.join(HERE, "documented")
 # without adding it here is how AN0002 broke.
 # --------------------------------------------------------------------------
 
+# The measurement windows the commands below use. The rate invariants are
+# derived from these, because the achievable tolerance depends on how many
+# interrupts fit in the window.
+FEATURES_IBI_WINDOW_S = 2.0
+IBI_COMMAND_WINDOW_S = 3.0
+
+def rate_within(configured_hz, window_s, clock_margin_pct=2.0):
+    """Build a check that the reported rate error is within the achievable bound.
+
+    A count of N interrupts over a window T at rate R is N = R*T plus or minus
+    one, so the smallest error the measurement can resolve is 100/(R*T) per
+    cent. At 10 Hz over 2 s that is 5 per cent, which is why a fixed 5 per cent
+    tolerance failed the BMP581 while passing the BMI323: 21 interrupts in
+    2.00 s is +5.0 per cent and is also exactly one interrupt. The tolerance
+    has to come from the measurement, not from a round number.
+    """
+    quantization = 100.0 / (configured_hz * window_s)
+    limit = quantization + clock_margin_pct
+
+    def check(text):
+        # Two commands phrase this differently: features says "against a
+        # configured 10 Hz (+5.0%)" and ibi says "configured output data rate
+        # 10 Hz (+3.3%)". Anchor on the rate and the parenthesised error only.
+        found = re.findall(r"%g Hz \(([-+]\d+\.\d)%%\)" % configured_hz, text)
+        if not found:
+            return False
+        return all(abs(float(value)) <= limit for value in found)
+
+    check.description_suffix = (f"within {limit:.1f}% "
+                                f"({quantization:.1f}% of that is one interrupt "
+                                f"over a {window_s:g} s window)")
+    return check
+
+
 # Invariants shared by every device, expressed as (description, pattern).
+# A pattern may be a regular expression, or a callable taking the output
+# and returning True, for checks that are numeric rather than textual.
 COMMON_FEATURE_INVARIANTS = [
     ("the refusal control passes",
      r"control: refusal reporting\s+supported"),
@@ -158,7 +194,7 @@ def device_commands(device):
              ("interrupts still arrive in latched mode",
               r"MDB %02X" % profile["mdb"]),
              ("the rate is still close to the configured rate",
-              r"configured output data rate %g Hz \([-+]\d+\.\d%%\)" % rate)],
+              rate_within(rate, IBI_COMMAND_WINDOW_S))],
             False))
     return commands
 
@@ -187,8 +223,8 @@ DEVICE_FACTS = {
             ("SETXTIME is either proven or explained",
              r"SETXTIME / GETXTIME\s+(supported\s+.* after SETXTIME"
              r"|undetermined\s+.*already be in the state they select)"),
-            ("the interrupt rate is within 5% of 50 Hz",
-             r"configured 50 Hz \([-+][0-4]\.\d%\)"),
+            ("the interrupt rate matches the configured rate",
+             rate_within(50, FEATURES_IBI_WINDOW_S)),
         ],
     },
     "bmp581": {
@@ -208,8 +244,8 @@ DEVICE_FACTS = {
         ],
         "feature_invariants": [
             ("the DCR identifies a pressure sensor", r"GETDCR\s+supported\s+0x62"),
-            ("the interrupt rate is within 5% of 10 Hz",
-             r"configured 10 Hz \([-+][0-4]\.\d%\)"),
+            ("the interrupt rate matches the configured rate",
+             rate_within(10, FEATURES_IBI_WINDOW_S)),
         ],
     },
     "bmp585": {
@@ -229,8 +265,8 @@ DEVICE_FACTS = {
         ],
         "feature_invariants": [
             ("the DCR identifies a pressure sensor", r"GETDCR\s+supported\s+0x62"),
-            ("the interrupt rate is within 5% of 10 Hz",
-             r"configured 10 Hz \([-+][0-4]\.\d%\)"),
+            ("the interrupt rate matches the configured rate",
+             rate_within(10, FEATURES_IBI_WINDOW_S)),
         ],
     },
 }
@@ -260,12 +296,22 @@ MASKS = (
     (re.compile(r"\braw ([0-9A-F]{2} ?)+"), "raw <bytes>"),
     (re.compile(r"payload_length': \d+"), "payload_length': <n>"),
     (re.compile(r"\bserial [0-9A-F]+\b"), "serial <serial>"),
-    # dynamic addresses move when SETNEWDA runs
-    (re.compile(r"0x0[0-9A-F]\b"), "<addr>"),
-    # Live data registers in the register dump: acceleration, temperature and
-    # status all read differently depending on whether the sensor happens to
-    # be running, which is not something a golden should pin down.
-    (re.compile(r"^(\s+<addr> \w+\s+)0x[0-9A-F]{2,4}$", re.M), r"\1<reg>"),
+    # The register dump is a snapshot of live state: acceleration, temperature,
+    # status and the mode registers all read differently depending on what the
+    # part happens to be doing. Mask the whole line, address and value, and do
+    # it before any address rule below can reach into the value column.
+    (re.compile(r"^(\s+)0x[0-9A-F]{2} (\w+\s+)0x[0-9A-F]{2,4}\s*$", re.M),
+     r"\g<1><reg-addr> \g<2><reg-value>"),
+    # Dynamic addresses move when SETNEWDA runs, so they are masked, but only
+    # where an address is actually what is being printed. An earlier version
+    # matched any 0x0X token and silently ate register values of 0x00 to 0x0F
+    # while leaving 0x10 alone, which made the mask depend on the data.
+    (re.compile(r"\b(at|from|to|address) 0x[0-9A-F]{2}\b"), r"\1 <addr>"),
+    (re.compile(r"\b(dynamic|static)=0x[0-9A-F]{2}\b"), r"\1=<addr>"),
+    (re.compile(r"\btable(:| dropped to) \[[^\]]*\]"), r"table\1 [<addrs>]"),
+    (re.compile(r"\bfinal table \[[^\]]*\]"), "final table [<addrs>]"),
+    (re.compile(r"\bre-enumerated at <addr>, chip id 0x[0-9A-F]{2}"),
+     "re-enumerated at <addr>, chip id <chip>"),
     # The DISEC retry count varies, so the whole clause is normalized at once.
     # Two overlapping rules previously left the trailing explanation behind.
     (re.compile(r"the stream stopped(,? but only)? after (one|\d+) DISEC"
@@ -280,11 +326,39 @@ MASKS = (
 )
 
 
+def mask_fingerprint():
+    """A short hash of the mask set, stamped into every golden.
+
+    A golden captured under a different set of masks is not comparable with a
+    run under the current set, and the resulting diff looks like a regression
+    in the tool when it is nothing of the kind. Only the device that is in the
+    socket can have its goldens regenerated, so a mask change necessarily
+    leaves the other devices' goldens stale. Stamping the fingerprint lets the
+    harness say so plainly instead of printing a misleading diff.
+    """
+    import hashlib
+    material = "\n".join(f"{pattern.pattern}=>{replacement}"
+                         for pattern, replacement in MASKS)
+    return hashlib.sha256(material.encode()).hexdigest()[:12]
+
+
+FINGERPRINT_PREFIX = "# mask-fingerprint: "
+
+
 def mask(text):
     for pattern, replacement in MASKS:
         text = pattern.sub(replacement, text)
     # trailing whitespace differences are never interesting
-    return "\n".join(line.rstrip() for line in text.splitlines()) + "\n"
+    body = "\n".join(line.rstrip() for line in text.splitlines()) + "\n"
+    return f"{FINGERPRINT_PREFIX}{mask_fingerprint()}\n{body}"
+
+
+def split_fingerprint(stored):
+    """Return (fingerprint, body) for a golden file's contents."""
+    if stored.startswith(FINGERPRINT_PREFIX):
+        first, _, rest = stored.partition("\n")
+        return first[len(FINGERPRINT_PREFIX):].strip(), rest
+    return None, stored
 
 
 # --------------------------------------------------------------------------
@@ -309,6 +383,10 @@ def golden_path(device, name):
 def check_invariants(text, invariants):
     missing = []
     for description, pattern in invariants:
+        if callable(pattern):
+            if not pattern(text):
+                missing.append((description, pattern))
+            continue
         if not re.search(pattern, text, re.M):
             missing.append((description, pattern))
     return missing
@@ -347,6 +425,26 @@ def main():
     if not args.slow:
         commands = [c for c in commands if not c[3]]
 
+    # Confirm the requested part is the one in the socket. Without this, every
+    # identity invariant fails one by one and the output reads like a broken
+    # tool rather than the wrong board being plugged in.
+    code, scan_output, _ = run_one(["scan"])
+    if code != 0:
+        print(f"  could not enumerate the bus:\n{scan_output.strip()}")
+        return 1
+    wanted = DEVICE_FACTS[args.device]["device_id"]
+    if f"device id 0x{wanted}" not in scan_output:
+        found = re.findall(r"device id 0x([0-9A-F]{4})", scan_output)
+        names = {facts["device_id"]: name
+                 for name, facts in DEVICE_FACTS.items()}
+        installed = ", ".join(f"0x{value} ({names.get(value, 'unknown')})"
+                              for value in found) or "nothing"
+        print(f"  {args.device} is not on the target board.")
+        print(f"    asked for device id 0x{wanted}, the bus has {installed}")
+        print(f"    one part is in the socket at a time, so install "
+              f"{args.device} or pass --device for what is fitted")
+        return 1
+
     print(f"{args.device}: {len(commands)} documented command(s)"
           f"{' (updating goldens)' if args.update else ''}\n")
 
@@ -374,7 +472,17 @@ def main():
         else:
             with open(path, encoding="utf-8") as handle:
                 expected = handle.read()
-            if expected != masked:
+            stored_print, _ = split_fingerprint(expected)
+            if stored_print != mask_fingerprint():
+                # Not a regression: the mask set moved on since this golden was
+                # captured, and only the installed device can be regenerated.
+                problems.append(
+                    f"golden is stale: captured under mask set "
+                    f"{stored_print or 'unstamped'}, current set is "
+                    f"{mask_fingerprint()}. Install this device and rerun with "
+                    f"--update")
+                status = "stale"
+            elif expected != masked:
                 problems.append("shape differs from the golden")
                 status = "differs"
             else:
