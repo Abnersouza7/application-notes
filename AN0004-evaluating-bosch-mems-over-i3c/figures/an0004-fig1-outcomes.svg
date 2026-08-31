@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 330" width="640" height="330"
+     font-family="Inter, 'Segoe UI', system-ui, Arial, sans-serif">
+
+  <rect x="0" y="0" width="640" height="330" fill="#FFFFFF"/>
+
+  <text x="320" y="18" text-anchor="middle" font-size="12.5" font-weight="600" fill="#111827">
+    Three outcomes of one command, and what the host can tell apart
+  </text>
+
+  <!-- column headings -->
+  <text x="86"  y="44" text-anchor="middle" font-size="9.5" font-weight="600"
+        letter-spacing="0.6" fill="#6B7280">ON THE BUS</text>
+  <text x="310" y="44" text-anchor="middle" font-size="9.5" font-weight="600"
+        letter-spacing="0.6" fill="#6B7280">WHAT THE TARGET DOES</text>
+  <text x="540" y="44" text-anchor="middle" font-size="9.5" font-weight="600"
+        letter-spacing="0.6" fill="#6B7280">WHAT THE HOST SEES</text>
+  <path d="M20 52 L620 52" stroke="#D9E1EE" stroke-width="1"/>
+
+  <!-- ============ row A: no target at that address ============ -->
+  <rect x="20" y="66" width="132" height="40" rx="3" fill="#F1F4FA" stroke="#BCC8DC"/>
+  <text x="86" y="82" text-anchor="middle" font-size="10.5" fill="#33405A">command to</text>
+  <text x="86" y="96" text-anchor="middle" font-size="10.5" font-weight="600" fill="#33405A">an empty address</text>
+
+  <path d="M158 86 L192 86" stroke="#BCC8DC" stroke-width="1.2"/>
+  <path d="M192 86 l-6 -3.5 l0 7 z" fill="#BCC8DC"/>
+
+  <rect x="198" y="66" width="224" height="40" rx="3" fill="#FFFFFF" stroke="#BCC8DC"/>
+  <text x="310" y="83" text-anchor="middle" font-size="10.5" fill="#33405A">
+    nothing answers, so the address
+  </text>
+  <text x="310" y="97" text-anchor="middle" font-size="10.5" font-weight="600" fill="#33405A">
+    is not acknowledged
+  </text>
+
+  <path d="M428 86 L462 86" stroke="#BCC8DC" stroke-width="1.2"/>
+  <path d="M462 86 l-6 -3.5 l0 7 z" fill="#BCC8DC"/>
+
+  <rect x="468" y="66" width="152" height="40" rx="3" fill="#F1F4FA" stroke="#8C99AE"/>
+  <text x="544" y="90" text-anchor="middle" font-size="10.5" font-weight="600" fill="#33405A">
+    a refusal, reported
+  </text>
+
+  <!-- ============ row B: implemented ============ -->
+  <rect x="20" y="130" width="132" height="40" rx="3" fill="#EAF0FF" stroke="#1557F9"/>
+  <text x="86" y="146" text-anchor="middle" font-size="10.5" fill="#0B3FC4">command the</text>
+  <text x="86" y="160" text-anchor="middle" font-size="10.5" font-weight="600" fill="#0B3FC4">target implements</text>
+
+  <path d="M158 150 L192 150" stroke="#1557F9" stroke-width="1.2"/>
+  <path d="M192 150 l-6 -3.5 l0 7 z" fill="#1557F9"/>
+
+  <rect x="198" y="130" width="224" height="40" rx="3" fill="#FFFFFF" stroke="#1557F9"/>
+  <text x="310" y="147" text-anchor="middle" font-size="10.5" fill="#0B3FC4">
+    acknowledges its address
+  </text>
+  <text x="310" y="161" text-anchor="middle" font-size="10.5" font-weight="600" fill="#0B3FC4">
+    and carries the command out
+  </text>
+
+  <path d="M428 150 L462 150" stroke="#1557F9" stroke-width="1.2"/>
+  <path d="M462 150 l-6 -3.5 l0 7 z" fill="#1557F9"/>
+
+  <rect x="468" y="130" width="152" height="40" rx="3" fill="#EAF0FF" stroke="#1557F9"/>
+  <text x="544" y="147" text-anchor="middle" font-size="10.5" font-weight="600" fill="#0B3FC4">success, and</text>
+  <text x="544" y="161" text-anchor="middle" font-size="10.5" font-weight="600" fill="#0B3FC4">something changed</text>
+
+  <!-- ============ row C: not implemented ============ -->
+  <rect x="20" y="194" width="132" height="40" rx="3" fill="#FFF6E8" stroke="#E8CFA4"/>
+  <text x="86" y="210" text-anchor="middle" font-size="10.5" fill="#8A5200">command the target</text>
+  <text x="86" y="224" text-anchor="middle" font-size="10.5" font-weight="600" fill="#8A5200">does not implement</text>
+
+  <path d="M158 214 L192 214" stroke="#E8CFA4" stroke-width="1.2"/>
+  <path d="M192 214 l-6 -3.5 l0 7 z" fill="#E8CFA4"/>
+
+  <rect x="198" y="194" width="224" height="40" rx="3" fill="#FFFFFF" stroke="#E8CFA4"/>
+  <text x="310" y="211" text-anchor="middle" font-size="10.5" fill="#8A5200">
+    acknowledges its address
+  </text>
+  <text x="310" y="225" text-anchor="middle" font-size="10.5" font-weight="600" fill="#8A5200">
+    and discards the command
+  </text>
+
+  <path d="M428 214 L462 214" stroke="#E8CFA4" stroke-width="1.2"/>
+  <path d="M462 214 l-6 -3.5 l0 7 z" fill="#E8CFA4"/>
+
+  <rect x="468" y="194" width="152" height="40" rx="3" fill="#FFF6E8" stroke="#E8CFA4"/>
+  <text x="544" y="211" text-anchor="middle" font-size="10.5" font-weight="600" fill="#8A5200">success, and</text>
+  <text x="544" y="225" text-anchor="middle" font-size="10.5" font-weight="600" fill="#8A5200">nothing changed</text>
+
+  <!-- ============ the brace joining rows B and C ============ -->
+  <path d="M628 130 L634 130 L634 234 L628 234" fill="none" stroke="#8A5200" stroke-width="1"/>
+
+  <path d="M20 254 L620 254" stroke="#D9E1EE" stroke-width="1"/>
+
+  <text x="20" y="274" font-size="10.5" font-weight="600" fill="#8A5200">
+    The result code separates row A from the other two. It does not separate B from C.
+  </text>
+  <text x="20" y="292" font-size="10.5" fill="#33405A">
+    Only an observable effect does: a value that changes when set, an address that stops
+  </text>
+  <text x="20" y="306" font-size="10.5" fill="#33405A">
+    answering, a counted interrupt rate. Row A is the control that proves refusals are
+  </text>
+  <text x="20" y="320" font-size="10.5" fill="#33405A">
+    reported at all, which is what makes the absence of one in row C meaningful.
+  </text>
+</svg>
