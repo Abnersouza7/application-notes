@@ -266,7 +266,7 @@ MASKS = (
     # status all read differently depending on whether the sensor happens to
     # be running, which is not something a golden should pin down.
     (re.compile(r"^(\s+<addr> \w+\s+)0x[0-9A-F]{2,4}$", re.M), r"\1<reg>"),
-    # The DISEC retry count varies, so the whole clause is normalised at once.
+    # The DISEC retry count varies, so the whole clause is normalized at once.
     # Two overlapping rules previously left the trailing explanation behind.
     (re.compile(r"the stream stopped(,? but only)? after (one|\d+) DISEC"
                 r"( attempts)?(; a single one is not always enough)?"),
