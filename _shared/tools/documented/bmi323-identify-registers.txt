@@ -1,3 +1,4 @@
+# mask-fingerprint: 41f66580892b
 bmi323  (Bosch Sensortec, 6-axis IMU)
   dynamic address <addr>
 
@@ -8,7 +9,7 @@ bmi323  (Bosch Sensortec, 6-axis IMU)
     instance id (15:12)          0b0000
     reserved (11:0)              0x000
 
-  BCR <addr>
+  BCR 0x06
     device role                      I3C target
     advanced capabilities (bit 5)    no, so SDR only
     virtual target support           no
@@ -19,7 +20,7 @@ bmi323  (Bosch Sensortec, 6-axis IMU)
 
   DCR 0xEF
 
-  CHIP_ID register <addr> reads 0x1143, raw <bytes>
+  CHIP_ID register 0x00 reads 0x1143, raw <bytes>
     chip id field 0x43, expected 0x43: match
     compared under mask 0x00FF, because the register carries other fields
 
@@ -27,14 +28,14 @@ bmi323  (Bosch Sensortec, 6-axis IMU)
   observable: tilt the board and the accelerometer axes change sign; at rest the magnitude is about 1 g
 
   registers
-    <addr> CHIP_ID          <reg>
-    <addr> ERR_REG          <reg>
-    <addr> STATUS           <reg>
-    <addr> ACC_DATA_X       <reg>
-    <addr> ACC_DATA_Y       <reg>
-    <addr> ACC_DATA_Z       <reg>
-    <addr> TEMP_DATA        <reg>
-    <addr> INT_STATUS_IBI   <reg>
-    0x20 ACC_CONF         0x0028
-    0x21 GYR_CONF         0x0048
-    0x3B INT_MAP2         0x0000
+    <reg-addr> CHIP_ID          <reg-value>
+    <reg-addr> ERR_REG          <reg-value>
+    <reg-addr> STATUS           <reg-value>
+    <reg-addr> ACC_DATA_X       <reg-value>
+    <reg-addr> ACC_DATA_Y       <reg-value>
+    <reg-addr> ACC_DATA_Z       <reg-value>
+    <reg-addr> TEMP_DATA        <reg-value>
+    <reg-addr> INT_STATUS_IBI   <reg-value>
+    <reg-addr> ACC_CONF         <reg-value>
+    <reg-addr> GYR_CONF         <reg-value>
+    <reg-addr> INT_MAP2         <reg-value>
