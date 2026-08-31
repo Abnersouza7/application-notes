@@ -241,6 +241,27 @@ class Bus:
                 "maxIbiPayloadLength": payload_length,
             })
 
+    def power_cycle(self, settle=1.5, voltage_mv=3300):
+        """Collapse the I3C rail and bring it back, power-cycling the target.
+
+        The adapter sources the bus rail, so handing that job to a
+        non-existent external supply drops it. This is the only recovery that
+        worked on an LSM6DSV whose anti-spike filter bit had been set: with the
+        filters forced on, the part still answered ENTDAA at open-drain speed
+        and refused every push-pull private transfer, and neither a slower
+        rate, nor addressing it as a legacy I2C target, nor the I3C target
+        reset pattern brought it back.
+
+        Worth having for its own sake: a target left in a state no bus command
+        can reach is otherwise a trip to the bench, and this makes exploring an
+        undocumented register map recoverable.
+        """
+        self.call(self.device.useExternalI3cVoltage)
+        time.sleep(settle)
+        self.call(self.device.setI3cVoltage, voltage_mv)
+        time.sleep(0.5)
+        return True
+
     def stop_ibis(self, address, attempts=4, settle=0.2, window=0.5):
         """Disable the target's IBI and confirm it actually stopped.
 
@@ -1321,6 +1342,34 @@ def cmd_reset(args):
     return 0
 
 
+def cmd_power_cycle(args):
+    """Power-cycle the target through the adapter's own rail control."""
+    with open_bus(args) as bus:
+        print(f"  dropping the I3C rail for {args.settle:g} s")
+        bus.power_cycle(settle=args.settle, voltage_mv=args.voltage)
+        print(f"  rail back at {args.voltage} mV")
+        bus.configure(voltage_mv=args.voltage, push_pull=args.push_pull,
+                      open_drain=args.open_drain, drive=args.drive)
+        table = bus.init_bus()
+        if not table:
+            print("  nothing enumerated afterwards")
+            return 1
+        for entry in table:
+            print(f"  enumerated 0x{entry['dynamic_address']:02X}  "
+                  f"pid {hex_bytes(entry['pid'])}")
+        if getattr(args, "device", None):
+            profile = make_profile(args.device, latched=args.latched)
+            address = table[0]["dynamic_address"]
+            settle_after_enumeration(bus, address, profile)
+            value, _ = bus.read_reg(address, profile.chip_id_register, profile)
+            masked = value & profile.chip_id_mask
+            ok = masked == profile.chip_id_expected
+            print(f"  {profile.name} chip id 0x{masked:02X}, expected "
+                  f"0x{profile.chip_id_expected:02X}: {'match' if ok else 'MISMATCH'}")
+            return 0 if ok else 1
+    return 0
+
+
 def cmd_features(args):
     profile = make_profile(args.device, latched=args.latched)
     with open_bus(args) as bus:
@@ -1546,6 +1595,14 @@ def build_parser():
 
     sub = add("reset", cmd_reset, "soft reset the part and re-enumerate")
     add_device(sub)
+
+    sub = add("power-cycle", cmd_power_cycle,
+              "drop the bus rail and bring it back, then re-enumerate")
+    sub.add_argument("--device", choices=sorted(PROFILES),
+                     help="check this profile's identity afterwards, optional")
+    sub.add_argument("--latched", action="store_true", help=argparse.SUPPRESS)
+    sub.add_argument("--settle", type=float, default=1.5,
+                     help="seconds to hold the rail down (default 1.5)")
 
     return parser
 
