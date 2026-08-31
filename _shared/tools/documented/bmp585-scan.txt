@@ -1,0 +1,8 @@
+# mask-fingerprint: 41f66580892b
+1 target(s) on the bus at 3300 mV, PUSH_PULL_5_MHZ_50_DC, OPEN_DRAIN_1_MHZ
+
+  dynamic address <addr>
+    PID  07 70 10 51 00 00   device id 0x1051
+    BCR  0x06   DCR 0x62
+    HDR  SDR only   IBI capable
+    profile  bmp585

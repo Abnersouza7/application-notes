@@ -1,0 +1,41 @@
+# mask-fingerprint: 41f66580892b
+bmp585  (Bosch Sensortec, barometric pressure sensor)
+  dynamic address <addr>
+
+  PID 07 70 10 51 10 00
+    MIPI member id (47:33)       0x03B8
+    id type selector (32)        0
+    device id (31:16)            0x1051
+    instance id (15:12)          0b0001
+    reserved (11:0)              0x000
+
+  BCR 0x06
+    device role                      I3C target
+    advanced capabilities (bit 5)    no, so SDR only
+    virtual target support           no
+    offline capable                  yes
+    IBI mandatory payload            yes
+    IBI capable                      yes
+    max data speed limit             no limit
+
+  DCR 0x62   pressure sensor, per the MIPI DCR registry
+
+  CHIP_ID register 0x01 reads 0x51, raw <bytes>
+    chip id field 0x51, expected 0x51: match
+
+  register access: 1-byte data, 0 dummy byte(s) before a read payload
+  observable: breathe on it or lift it and the pressure changes; about 12 Pa per meter of altitude; this is the media-resistant part, so a drop of water on the gel is survivable where the BMP581 would not be
+
+  registers
+    <reg-addr> CHIP_ID          <reg-value>
+    <reg-addr> REV_ID           <reg-value>
+    <reg-addr> CHIP_STATUS      <reg-value>
+    <reg-addr> INT_CONFIG       <reg-value>
+    <reg-addr> INT_SOURCE       <reg-value>
+    <reg-addr> TEMP_DATA_XLSB   <reg-value>
+    <reg-addr> PRESS_DATA_XLSB  <reg-value>
+    <reg-addr> INT_STATUS       <reg-value>
+    <reg-addr> STATUS           <reg-value>
+    <reg-addr> OSR_CONFIG       <reg-value>
+    <reg-addr> ODR_CONFIG       <reg-value>
+    <reg-addr> OSR_EFF          <reg-value>
