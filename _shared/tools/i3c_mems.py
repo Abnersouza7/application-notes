@@ -386,6 +386,20 @@ class Profile:
         """
         return "the part's default configuration"
 
+    # Command register and soft-reset value. A soft reset is the only way back
+    # from some latched modes: SETXTIME engages the BMI323's I3C timing
+    # control synchronous feature, which changes the IBI payload from one byte
+    # to four and survives both a host restart and a bus reset.
+    command_register = None
+    soft_reset_value = None
+
+    def soft_reset(self, bus, address):
+        if self.command_register is None:
+            return False
+        bus.write_reg(address, self.command_register, self.soft_reset_value, self)
+        time.sleep(0.1)
+        return True
+
     def expected_ibi_rate(self):
         return None
 
@@ -416,6 +430,8 @@ class Bmi323(Profile):
     INT_STATUS_IBI = 0x0F
     ACC_CONF = 0x20
     INT_MAP2 = 0x3B
+    command_register = 0x7E                  # CMD
+    soft_reset_value = 0xDEAF                # "largely equivalent to a power cycle"
 
     # acc_mode = 0b011, acc_range = 2 (+/-8 g), acc_odr = 7 (50 Hz)
     ACC_CONF_RUN = 0x3127
@@ -500,6 +516,8 @@ class Bmp58x(Profile):
     ODR_CONFIG = 0x37
     OSR_EFF = 0x38
     CMD = 0x7E
+    command_register = 0x7E
+    soft_reset_value = 0xB6
 
     PWR_STANDBY, PWR_NORMAL = 0b00, 0b01
     ODR_10HZ, ODR_30HZ = 0x17, 0x13         # both listed with Error = 0.00
@@ -880,19 +898,38 @@ def probe_hdr(bus, address, profile, bcr):
 
 
 def probe_timing_exchange(bus, address):
-    """SETXTIME changes a byte that GETXTIME reports, when it is implemented."""
+    """SETXTIME changes a byte that GETXTIME reports, when it is implemented.
+
+    The sub-commands select modes and the bits latch, so re-sending one the
+    part is already in is correctly a no-op. Measured on the BMI323: from a
+    GETXTIME of 03 00 0D 78, sub-command 0x3F moves byte 1 to 0x01 and then
+    never moves it again, while 0xDF moves it to 0x03. So a probe that sends
+    one sub-command can only prove support once per power cycle. Try several,
+    and if none of them move the value say why rather than calling it no
+    observable effect.
+    """
+    SUBCOMMANDS = (0x3F, 0xDF, 0x1F, 0x5F, 0x7F)
     ok_before, before = bus.try_call(bus.device.i3cGETXTIME, address)
     if not ok_before:
         return [("SETXTIME / GETXTIME", UNDETERMINED, "GETXTIME did not answer")]
-    bus.try_call(bus.device.i3cDirectSETXTIME, address, 0x3F, [])
-    ok_after, after = bus.try_call(bus.device.i3cGETXTIME, address)
-    b = payload_of(before)
-    a = payload_of(after) if ok_after else []
-    if a and a != b:
-        return [("SETXTIME / GETXTIME", SUPPORTED,
-                 f"{hex_bytes(b)} then {hex_bytes(a)} after SETXTIME 0x3F")]
+    baseline = payload_of(before)
+    current = baseline
+    for subcommand in SUBCOMMANDS:
+        bus.try_call(bus.device.i3cDirectSETXTIME, address, subcommand, [])
+        ok_after, after = bus.try_call(bus.device.i3cGETXTIME, address)
+        if not ok_after:
+            continue
+        value = payload_of(after)
+        if value and value != current:
+            return [("SETXTIME / GETXTIME", SUPPORTED,
+                     f"{hex_bytes(current)} then {hex_bytes(value)} after "
+                     f"SETXTIME 0x{subcommand:02X}")]
+        current = value or current
     return [("SETXTIME / GETXTIME", UNDETERMINED,
-             f"{hex_bytes(b)} unchanged; no observable effect")]
+             f"{hex_bytes(baseline)} unmoved by sub-commands "
+             f"{', '.join(f'0x{s:02X}' for s in SUBCOMMANDS)}; the part may "
+             f"already be in the state they select, which a power cycle would "
+             f"reset")]
 
 
 def probe_no_observable(bus, address):
@@ -992,8 +1029,11 @@ def probe_ibi(bus, address, profile, seconds=3.0):
         if first:
             bits = ", ".join(f"{k}={v}" for k, v in
                              profile.decode_mdb(first[0]).items())
-            out.append(("IBI mandatory data byte", SUPPORTED,
-                        f"0x{first[0]:02X}: {bits}"))
+            detail = f"0x{first[0]:02X}: {bits}"
+            if len(first) > 1:
+                detail += (f"; followed by {len(first) - 1} further byte(s) "
+                           f"{hex_bytes(first[1:])}, not decoded here")
+            out.append(("IBI mandatory data byte", SUPPORTED, detail))
         out.append(("IBI payloads seen", SUPPORTED, str(dict(payloads))))
     else:
         out.append(("ENEC and IBI delivery", UNDETERMINED,
@@ -1209,8 +1249,10 @@ def cmd_ibi(args):
                 bits = (", ".join(f"{k}={v}" for k, v in
                                   profile.decode_mdb(payload[0]).items())
                         if payload else "no payload")
+                extra = (f"  extra {hex_bytes(payload[1:])}"
+                         if len(payload) > 1 else "")
                 print(f"  IBI from 0x{notification.get('target_address', 0):02X}"
-                      f"  MDB {hex_bytes(payload)}  {bits}")
+                      f"  MDB {hex_bytes(payload[:1])}{extra}  {bits}")
                 shown[0] += 1
 
         started = time.monotonic()
@@ -1239,6 +1281,32 @@ def cmd_ibi(args):
     return 0
 
 
+def cmd_reset(args):
+    """Soft reset the target, which is the only way out of some latched modes."""
+    profile = make_profile(args.device, latched=args.latched)
+    with open_bus(args) as bus:
+        address, _ = find_target(bus, profile)
+        before, _ = bus.read_reg(address, profile.chip_id_register, profile)
+        print(f"{profile.name} at 0x{address:02X}, chip id 0x"
+              f"{before & profile.chip_id_mask:02X}")
+        if not profile.soft_reset(bus, address):
+            print("  this profile does not define a soft reset")
+            return 1
+        print(f"  wrote 0x{profile.soft_reset_value:02X} to register "
+              f"0x{profile.command_register:02X}")
+        table = bus.init_bus()
+        if not table:
+            print("  nothing enumerated after the reset")
+            return 1
+        address = table[0]["dynamic_address"]
+        settle_after_enumeration(bus, address, profile)
+        after, _ = bus.read_reg(address, profile.chip_id_register, profile)
+        print(f"  re-enumerated at 0x{address:02X}, chip id 0x"
+              f"{after & profile.chip_id_mask:02X}")
+        print("  configuration registers are back to their reset values")
+    return 0
+
+
 def cmd_features(args):
     profile = make_profile(args.device, latched=args.latched)
     with open_bus(args) as bus:
@@ -1252,11 +1320,15 @@ def cmd_features(args):
         rows += identity
         rows += probe_control(bus, address, profile, table)
         rows += probe_length_limits(bus, address)
-        rows += probe_timing_exchange(bus, address)
         rows += probe_group_address(bus, address, profile)
         rows += probe_hdr(bus, address, profile, bcr)
         rows += probe_no_observable(bus, address)
         rows += probe_ibi(bus, address, profile, seconds=args.seconds)
+        # SETXTIME latches a mode that changes the IBI payload from one byte to
+        # four and sets mandatory-byte bit 7, so it has to run after the
+        # interrupt measurement rather than before it. Ordering probes by what
+        # they leave behind matters as much as what they test.
+        rows += probe_timing_exchange(bus, address)
         moved, address = probe_new_address(bus, address, profile)
         rows += moved
         rows += probe_reset(bus, address, profile)
@@ -1267,6 +1339,23 @@ def cmd_features(args):
         for name, verdict, detail in rows:
             print(f"  {name.ljust(width)}  {verdict:16s}  {detail}")
 
+        # Leave the part as it was found. Without this the battery is not
+        # repeatable: the SETXTIME probe latches a mode that changes the IBI
+        # payload, so a second run measures a different device than the first.
+        # RSTDAA has just removed the dynamic address, so the bus has to be
+        # brought back up before the part can be written to at all.
+        restored = False
+        table = bus.init_bus()
+        if table:
+            address = table[0]["dynamic_address"]
+            settle_after_enumeration(bus, address, profile)
+            try:
+                restored = profile.soft_reset(bus, address)
+            except MemsError as exc:
+                print(f"  could not soft reset the part afterwards: {exc}")
+        if restored:
+            print("  the part was soft reset afterwards, to undo the modes "
+                  "this battery latched\n")
         counts = Counter(verdict for _, verdict, _ in rows)
         print(f"\n  {counts[SUPPORTED]} supported, "
               f"{counts[NOT_IMPLEMENTED]} not implemented, "
@@ -1440,6 +1529,9 @@ def build_parser():
     sub = add("rates", cmd_rates, "find the highest error-free bus rate")
     add_device(sub)
     sub.add_argument("--iterations", type=int, default=200)
+
+    sub = add("reset", cmd_reset, "soft reset the part and re-enumerate")
+    add_device(sub)
 
     return parser
 

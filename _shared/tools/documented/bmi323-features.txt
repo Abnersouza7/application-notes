@@ -1,0 +1,34 @@
+bmi323 at <addr>, adapter rates PUSH_PULL_5_MHZ_50_DC / OPEN_DRAIN_1_MHZ at 3300 mV
+
+  feature                     verdict           evidence
+  --------------------------  ----------------  --------
+  GETPID                      supported         07 70 10 43 00 00, device id 0x1043
+  GETBCR                      supported         <addr>
+  GETDCR                      supported         0xEF
+  control: refusal reporting  supported         GETPID, SETMWL and a private read at the unoccupied address <addr> were all refused, so a SUCCESS above means the target accepted the command
+  SETMWL / GETMWL             not implemented   [0, 0] unchanged after setting 64
+  SETMRL / GETMRL             not implemented   [0, 0] unchanged after setting 32
+  SETGRPA / RSTGRPA           not implemented   0x20 still does not answer after the command
+  HDR modes                   not implemented   BCR bit 5 clear, so the target declares SDR only
+  GETHDRCAP (0x95)            not implemented   answers 00, so no HDR modes
+  HDR-DDR read attempt        undetermined      returned SUCCESS, which is not diagnostic; bus intact afterwards
+  ENTAS0                      undetermined      returned SUCCESS; proving an activity state needs a current measurement
+  ENTAS1                      undetermined      returned SUCCESS; proving an activity state needs a current measurement
+  ENTAS2                      undetermined      returned SUCCESS; proving an activity state needs a current measurement
+  ENTAS3                      undetermined      returned SUCCESS; proving an activity state needs a current measurement
+  RSTACT                      undetermined      returned SUCCESS; no observable effect from the host side
+  GETMXDS                     undetermined      answers 00 00; a part that implements it reports real limits
+  IBI before ENEC             not implemented   <n> in <seconds>
+  ENEC and IBI delivery       supported         <n> in <seconds> = <rate>, against a configured 50 Hz (<error>)
+  IBI mandatory data byte     supported         <addr>: FIFO watermark or full=False, sample ready (acc, gyr, temp)=True, feature interrupts=False, interrupt group id=0
+  IBI payloads seen           supported         {(<mdb>,): <n>}
+  DISEC stops them            supported         the stream stopped after <n> DISEC attempts
+  hot-join                    not implemented   no hot-join notification at any point
+  SETXTIME / GETXTIME         supported         <before> then <after> after SETXTIME <subcommand>
+  SETNEWDA                    supported         moved <addr> to <addr> and the old address stopped answering
+  RSTDAA                      supported         the table dropped to [0] and <addr> stopped answering
+  the part was soft reset afterwards, to undo the modes this battery latched
+  <counts>
+  a verdict of undetermined means the command completed and nothing measurable changed.
+  it is not a no: on this bus a target accepts and discards commands it does not implement,
+  so a result code alone is never evidence of support.

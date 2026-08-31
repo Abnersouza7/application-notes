@@ -1,0 +1,7 @@
+bmi323 at <addr>: interrupt routed to the I3C IBI, the part's default configuration
+  IBI from <addr>  MDB 02  FIFO watermark or full=False, sample ready (acc, gyr, temp)=True, feature interrupts=False, interrupt group id=0
+  IBI from <addr>  MDB 02  FIFO watermark or full=False, sample ready (acc, gyr, temp)=True, feature interrupts=False, interrupt group id=0
+
+  <n> interrupts in <seconds> = <rate>
+  configured output data rate 50 Hz (<error>)
+  the rate is comparable with the configured rate; individual arrival times are not, because USB coalesces them
