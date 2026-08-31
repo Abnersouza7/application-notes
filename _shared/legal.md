@@ -1,9 +1,17 @@
 ---
-status: Approved
+status: Approved, with one change pending review
 approved: 29 August 2026
 note: |
   Reviewed and approved for publication. Renders into the back of every note, so
   any change here applies to the whole series and needs re-approval.
+
+  Change since approval, 31 August 2026: the vendor and technology trademark list
+  moved out of this file into a 'trademarks' field in each note's front matter,
+  because the brands a note references vary by note. The rendered text of AN0001,
+  AN0002 and AN0003 is byte-identical to the approved version, verified against
+  the previously built PDFs. AN0004 carries a new list naming Bosch Sensortec.
+  Two things need confirming: that a per-note list is acceptable, and that the
+  Bosch entity attribution in AN0004 is correct.
 ---
 
 #### Definitions
@@ -91,7 +99,4 @@ concerning its products.
 #### Trademarks
 
 All referenced brands, product names, service names and trademarks are the property of their
-respective owners. **Binho** and the Binho logo are trademarks of {{company}} **Arm** and
-**Cortex** are registered trademarks of Arm Limited. **I3C** and **MIPI** are trademarks or
-registered trademarks of MIPI Alliance, Inc. **STM32**, **Nucleo** and **STMicroelectronics**
-are trademarks or registered trademarks of STMicroelectronics N.V.
+respective owners. **Binho** and the Binho logo are trademarks of {{company}} {{trademarks}}

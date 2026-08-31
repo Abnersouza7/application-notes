@@ -7,6 +7,11 @@ kind: Application note
 company: Binho Inc.
 website: binho.io
 keywords: ANXXXX, <product>, <bus>, <part numbers>, <task>
+trademarks: |
+  <Only the marks this note actually references. The shared legal page supplies the
+  generic sentence and Binho's own marks; this field supplies the rest. Claiming a
+  vendor's marks in a note that does not mention them is worse than claiming none,
+  so check the note text before filling this in. The build refuses without it.>
 abstract: |
   Three to five sentences. What the document enables, on which hardware, and what is
   supplied with it. Written for someone deciding whether this note answers their question.
