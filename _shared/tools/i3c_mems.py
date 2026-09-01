@@ -104,6 +104,7 @@ class Bus:
         self.verbose = verbose
         self._responses = queue.Queue()
         self.ibis = queue.Queue()
+        self.events = queue.Queue()
         self._next_id = 0
         self._opened = False
 
@@ -139,15 +140,48 @@ class Bus:
 
     # -- plumbing ----------------------------------------------------------
 
+    # A notification carries id 0. Only one kind of notification is an
+    # in-band interrupt, and the rest have to be kept out of the interrupt
+    # queue or they are counted as interrupts that never happened.
+    IBI_NOTIFICATION = "I3C CONTROLLER IBI REQUEST NOTIFICATION"
+
     def _on_event(self, response, system_message):
         # Called from the SDK receive thread, so it must return promptly.
         if response is None:
             return
         if isinstance(response, dict) and response.get("id") == 0:
             response["_t"] = time.monotonic()
-            self.ibis.put(response)
+            if response.get("command") == self.IBI_NOTIFICATION:
+                self.ibis.put(response)
+            else:
+                # Hot-join, target bus events, and anything the adapter emits
+                # when the bus is in trouble. Measured on the LSM6DSV: a
+                # misconfigured interrupt source produced about a thousand of
+                # these per second, with empty payloads and result codes the
+                # SDK has no name for, and counting them as interrupts said
+                # the part supported a feature it had not demonstrated.
+                self.events.put(response)
         else:
             self._responses.put(response)
+
+    def drain_events(self):
+        """Return and clear the non-interrupt notifications seen so far."""
+        out = []
+        while True:
+            try:
+                out.append(self.events.get_nowait())
+            except queue.Empty:
+                return out
+
+    def event_summary(self):
+        """Describe the non-interrupt notifications, for reporting."""
+        seen = self.drain_events()
+        if not seen:
+            return None
+        kinds = Counter((n.get("command"), n.get("result")) for n in seen)
+        parts = [f"{count} x {command or '?'} / {result or '?'}"
+                 for (command, result), count in kinds.most_common(4)]
+        return f"{len(seen)} non-interrupt notification(s): " + ", ".join(parts)
 
     def call(self, method, *args, timeout=5.0, allowed=(), **kwargs):
         """Send a request and block for the response carrying the same id."""
@@ -239,6 +273,45 @@ class Bus:
                              timeout=10.0)
         return response.get("table") or []
 
+    # The adapter will not deliver an in-band interrupt from a target whose
+    # declared maximum IBI payload is larger than this. Measured by sweeping
+    # the target's own GETMRL third byte against a fixed adapter setting: caps
+    # of 1, 2, 4, 7 and 8 all deliver, and the payload arrives at exactly the
+    # declared size; 9 and 10 deliver nothing at all, silently. The
+    # maxIbiPayloadLength field of SetTargetDeviceConfiguration makes no
+    # difference to this, at 1, 2, 4, 8 or 16, which matches the target table
+    # reporting max_ibi_payload_length as 0 whatever is asked for.
+    MAX_IBI_PAYLOAD = 8
+
+    def ibi_payload_cap(self, address):
+        """The target's own declared maximum IBI payload, or None."""
+        ok, response = self.try_call(self.device.i3cGETMRL, address)
+        payload = payload_of(response) if ok else None
+        return payload[2] if payload and len(payload) > 2 else None
+
+    def fit_ibi_payload(self, address):
+        """Bring a target's declared IBI payload within what the adapter takes.
+
+        A target may legitimately declare a maximum IBI payload larger than the
+        controller can accept, and nothing on either side reports the mismatch:
+        the target raises interrupts, the controller never delivers one, and
+        every register on the target says the interrupt fired. Measured on the
+        LSM6DSV, which declares 10 and goes completely silent until it is asked
+        for 8 or fewer, at which point it streams normally.
+
+        Returns (cap_before, cap_after, changed).
+        """
+        before = self.ibi_payload_cap(address)
+        if before is None or before <= self.MAX_IBI_PAYLOAD:
+            return before, before, False
+        ok, response = self.try_call(self.device.i3cGETMRL, address)
+        payload = payload_of(response) if ok else None
+        read_length = ((payload[0] << 8) | payload[1]) if payload and len(payload) > 1 else 0x0010
+        self.try_call(self.device.i3cDirectSETMRL, address, read_length,
+                      self.MAX_IBI_PAYLOAD)
+        after = self.ibi_payload_cap(address)
+        return before, after, after != before
+
     def accept_ibis(self, address, payload_length=8):
         from binhosupernova.commands.i3c.definitions import (
             TargetType, TargetInterruptRequest, ControllerRoleRequest,
@@ -256,6 +329,20 @@ class Bus:
                 "pendingReadCapability": PendingReadCapability.DISABLE_AUTOMATIC_READ,
                 "maxIbiPayloadLength": payload_length,
             })
+
+    def enable_ibis(self, address, payload_length=8):
+        """Configure the adapter to accept this target's interrupts, and make
+        sure the target is not asking for a bigger payload than it can take.
+
+        accept_ibis on its own is not enough, and that cost most of a bench
+        session: it configures the controller and says nothing about the
+        target, so a target declaring an oversized IBI payload stays silent
+        with every indication that it should not be.
+        """
+        result = self.accept_ibis(address, payload_length=payload_length)
+        before, after, changed = self.fit_ibi_payload(address)
+        return {"configured": result, "payload_cap_before": before,
+                "payload_cap_after": after, "changed": changed}
 
     def power_cycle(self, settle=1.5, voltage_mv=3300):
         """Collapse the I3C rail and bring it back, power-cycling the target.
@@ -364,6 +451,7 @@ class Bus:
                     drained += 1
                 except queue.Empty:
                     break
+        self.drain_events()
         return drained
 
     def collect_ibis(self, seconds, on_each=None):
