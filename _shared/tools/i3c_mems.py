@@ -580,6 +580,19 @@ class Profile:
         time.sleep(0.1)
         return True
 
+    # Motion-triggered interrupt, for parts that have one. Returns a short
+    # description of what the reader should do to trigger it, or None if the
+    # part has no such feature.
+    def arm_motion_interrupt(self, bus, address, threshold=2):
+        return None
+
+    def motion_sources(self, bus, address):
+        """Decode whatever source register the motion interrupt sets."""
+        return {}
+
+    def clear_motion_interrupt(self, bus, address):
+        return None
+
     def clear_latched_modes(self, bus, address):
         """Undo anything a CCC latched that a later run would inherit.
 
@@ -1143,6 +1156,54 @@ class Lsm6dsv(Profile):
         if timestamped:
             decoded["timestamp"] = hex_bytes(payload[1:4])
         return decoded
+
+    # Wake-up detection, which is the interrupt worth demonstrating because a
+    # tap on the board produces it. Everything except data-ready is gated by
+    # FUNCTIONS_ENABLE bit 7 and routed through MD1_CFG rather than INT1_CTRL.
+    INTERRUPTS_ENABLE_BIT = 1 << 7           # FUNCTIONS_ENABLE
+    SLOPE_FDS_BIT, LIR_BIT = 1 << 4, 1 << 0  # TAP_CFG0
+    INT1_WU_BIT = 1 << 5                     # MD1_CFG
+
+    def arm_motion_interrupt(self, bus, address, threshold=2):
+        # Threshold is in units of full scale / 64, so at +/- 2 g one count is
+        # about 31 mg. Two counts sits above the noise of a still board and
+        # below a deliberate tap, measured: silent at rest over 35 s.
+        bus.write_reg(address, self.INT1_CTRL, 0x00, self)
+        bus.write_reg(address, self.MD1_CFG, 0x00, self)
+        current, _ = bus.read_reg(address, self.CTRL3, self)
+        bus.write_reg(address, self.CTRL3, current | self.IF_INC, self)
+        bus.write_reg(address, self.CTRL8, 0x00, self)          # +/- 2 g
+        bus.write_reg(address, self.CTRL1, self.ODR_60HZ, self)
+        # Slope filter, and latch the interrupt so one event is one interrupt
+        # rather than a level the part keeps re-asserting.
+        bus.write_reg(address, self.TAP_CFG0,
+                      self.SLOPE_FDS_BIT | self.LIR_BIT, self)
+        bus.write_reg(address, self.WAKE_UP_THS, threshold & 0x3F, self)
+        bus.write_reg(address, self.WAKE_UP_DUR, 0x00, self)
+        bus.write_reg(address, self.FUNCTIONS_ENABLE,
+                      self.INTERRUPTS_ENABLE_BIT, self)
+        bus.write_reg(address, self.MD1_CFG, self.INT1_WU_BIT, self)
+        time.sleep(0.2)
+        bus.read_reg(address, self.ALL_INT_SRC, self)           # start cleared
+        return "tap or tilt the board"
+
+    def motion_sources(self, bus, address):
+        """Which axes triggered, read from WAKE_UP_SRC. Best effort.
+
+        Which *feature* fired is in the interrupt payload and needs no read at
+        all, so that is what the caller should report. The per-axis bits are
+        only in WAKE_UP_SRC, and with the interrupt latched and re-triggering
+        they can be cleared before the host gets to them, so a blank answer
+        here is normal and does not mean the interrupt was spurious.
+        """
+        wake, _ = bus.read_reg(address, self.WAKE_UP_SRC, self)
+        axes = [name for bit, name in ((0x04, "X"), (0x02, "Y"), (0x01, "Z"))
+                if wake & bit]
+        return {"axes": ",".join(axes) or "(cleared before the read)"}
+
+    def clear_motion_interrupt(self, bus, address):
+        bus.read_reg(address, self.ALL_INT_SRC, self)
+        return None
 
     def clear_latched_modes(self, bus, address):
         # SW_RESET clears IF_INC as well, so it has to be put back or the next
@@ -2032,6 +2093,63 @@ def cmd_ibi(args):
     return 0
 
 
+def cmd_wake(args):
+    """Arm a motion interrupt and report each one as it arrives."""
+    from binhosupernova.commands.i3c.definitions import ENEC, DISEC
+    profile = make_profile(args.device, latched=args.latched)
+    with open_bus(args) as bus:
+        address, _ = find_target(bus, profile)
+        bus.quiesce(address)
+        info = bus.enable_ibis(address)
+        prompt = profile.arm_motion_interrupt(bus, address,
+                                              threshold=args.threshold)
+        if prompt is None:
+            print(f"{profile.name} has no motion interrupt in this profile")
+            return 1
+        if info.get("changed"):
+            print(f"  interrupt payload: the target asked for "
+                  f"{info['payload_cap_before']} bytes and was given "
+                  f"{info['payload_cap_after']}, which is what the adapter takes")
+        print(f"{profile.name} at 0x{address:02X}: wake-up armed at threshold "
+              f"{args.threshold}, routed to the I3C in-band interrupt")
+        print(f"\n  {prompt.upper()}. Listening for {args.seconds:g} s.\n")
+
+        bus.drain_ibis(settle=0.05)
+        bus.try_call(bus.device.i3cDirectENEC, address, [ENEC.ENINT])
+        got = []
+        started = time.monotonic()
+        end = started + args.seconds
+        while time.monotonic() < end:
+            batch = bus.collect_ibis(0.2)
+            for notification in batch:
+                when = time.monotonic() - started
+                payload = payload_of(notification)
+                sources = profile.motion_sources(bus, address)
+                profile.clear_motion_interrupt(bus, address)
+                got.append((when, payload, sources))
+                if len(got) <= args.show:
+                    # The feature comes from the payload, which is race free.
+                    # The axes come from a register and may already be cleared.
+                    decoded = profile.decode_payload(payload)
+                    fired = [name for name, value in decoded.items() if value == 1]
+                    print(f"  t={when:6.2f}s  MDB {hex_bytes(payload[:1])}  "
+                          f"payload says {', '.join(fired) or 'no source bit'}"
+                          f"   axes {sources.get('axes')}")
+            if len(batch) / 0.2 > 200:
+                print("  interrupt rate looks like a storm; disarming")
+                break
+        bus.try_call(bus.device.i3cDirectDISEC, address, [DISEC.DISINT])
+        elapsed = time.monotonic() - started
+
+        print(f"\n  {len(got)} wake-up interrupt(s) in {elapsed:.1f} s")
+        if not got:
+            print("  nothing arrived. A still board should not trigger this, so "
+                  "tap it harder or lower --threshold")
+        profile.stop_stream(bus, address)
+        bus.stop_ibis(address)
+    return 0
+
+
 def cmd_reset(args):
     """Soft reset the target, which is the only way out of some latched modes."""
     profile = make_profile(args.device, latched=args.latched)
@@ -2311,6 +2429,16 @@ def build_parser():
     add_device(sub)
     sub.add_argument("--seconds", type=float, default=3.0,
                      help="how long to count interrupts for")
+
+    sub = add("wake", cmd_wake,
+              "arm a motion interrupt and report each one that arrives")
+    add_device(sub)
+    sub.add_argument("--seconds", type=float, default=20.0,
+                     help="how long to listen for")
+    sub.add_argument("--threshold", type=int, default=2,
+                     help="wake-up threshold in units of full scale / 64")
+    sub.add_argument("--show", type=int, default=10,
+                     help="how many individual interrupts to print")
 
     sub = add("rates", cmd_rates, "find the highest error-free bus rate")
     add_device(sub)
