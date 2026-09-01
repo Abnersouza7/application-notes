@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" width="640" height="360"
+     font-family="Inter, 'Segoe UI', system-ui, Arial, sans-serif">
+
+  <rect x="0" y="0" width="640" height="360" fill="#FFFFFF"/>
+
+  <text x="320" y="18" text-anchor="middle" font-size="12.5" font-weight="600" fill="#111827">
+    Three steps to an in-band interrupt, and where each one lives
+  </text>
+
+  <text x="112" y="44" text-anchor="middle" font-size="9.5" font-weight="600"
+        letter-spacing="0.6" fill="#6B7280">1. ENABLE THE SOURCE</text>
+  <text x="320" y="44" text-anchor="middle" font-size="9.5" font-weight="600"
+        letter-spacing="0.6" fill="#6B7280">2. ROUTE IT TO THE IBI</text>
+  <text x="528" y="44" text-anchor="middle" font-size="9.5" font-weight="600"
+        letter-spacing="0.6" fill="#6B7280">3. ENABLE INTERRUPTS</text>
+  <path d="M20 52 L620 52" stroke="#D9E1EE" stroke-width="1"/>
+
+  <defs>
+    <marker id="tip" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#9CA3AF"/>
+    </marker>
+  </defs>
+  <path d="M204 97 L228 97" stroke="#9CA3AF" stroke-width="1.4" marker-end="url(#tip)"/>
+  <path d="M412 97 L436 97" stroke="#9CA3AF" stroke-width="1.4" marker-end="url(#tip)"/>
+  <path d="M204 187 L228 187" stroke="#9CA3AF" stroke-width="1.4" marker-end="url(#tip)"/>
+  <path d="M412 187 L436 187" stroke="#9CA3AF" stroke-width="1.4" marker-end="url(#tip)"/>
+
+  <!-- ============ BMI323 ============ -->
+  <text x="24" y="76" font-size="10" font-weight="600" fill="#374151">BMI323, accelerometer data-ready</text>
+
+  <rect x="24" y="82" width="180" height="30" rx="4" fill="#F3F6FB" stroke="#C7D2E4"/>
+  <text x="114" y="101" text-anchor="middle" font-size="10" fill="#111827">
+    ACC_CONF, mode and rate
+  </text>
+
+  <rect x="232" y="82" width="180" height="30" rx="4" fill="#FFF4E5" stroke="#EAD2A8"/>
+  <text x="322" y="101" text-anchor="middle" font-size="10" fill="#111827">
+    INT_MAP2, field = 0b11
+  </text>
+
+  <rect x="440" y="82" width="176" height="30" rx="4" fill="#EAF3EC" stroke="#B7D8BF"/>
+  <text x="528" y="101" text-anchor="middle" font-size="10" fill="#111827">
+    ENEC with ENINT
+  </text>
+
+  <text x="232" y="126" font-size="9" fill="#92400E">
+    0b01 is the INT1 pin, 0b10 is INT2, 0b11 is the in-band interrupt
+  </text>
+
+  <!-- ============ BMP581 / BMP585 ============ -->
+  <text x="24" y="158" font-size="10" font-weight="600" fill="#374151">BMP581 and BMP585, data-ready</text>
+
+  <rect x="24" y="164" width="180" height="46" rx="4" fill="#F3F6FB" stroke="#C7D2E4"/>
+  <text x="114" y="181" text-anchor="middle" font-size="10" fill="#111827">
+    OSR_CONFIG, press_en
+  </text>
+  <text x="114" y="196" text-anchor="middle" font-size="10" fill="#111827">
+    ODR_CONFIG, rate
+  </text>
+
+  <rect x="232" y="164" width="180" height="46" rx="4" fill="#FFF4E5" stroke="#EAD2A8"/>
+  <text x="322" y="181" text-anchor="middle" font-size="10" fill="#111827">
+    INT_CONFIG, int_en
+  </text>
+  <text x="322" y="196" text-anchor="middle" font-size="10" fill="#111827">
+    and int_mode
+  </text>
+
+  <rect x="440" y="164" width="176" height="46" rx="4" fill="#EAF3EC" stroke="#B7D8BF"/>
+  <text x="528" y="191" text-anchor="middle" font-size="10" fill="#111827">
+    ENEC with ENINT
+  </text>
+
+  <!-- the standby ordering constraint -->
+  <rect x="24" y="220" width="592" height="26" rx="4" fill="#FDECEC" stroke="#E9BEBE"/>
+  <text x="34" y="237" font-size="9.5" fill="#7F1D1D">
+    Write all of the above in standby, then enter normal mode. The interrupt block adopts INT_CONFIG only on that transition.
+  </text>
+
+  <path d="M20 266 L620 266" stroke="#D9E1EE" stroke-width="1"/>
+
+  <text x="24" y="286" font-size="9.5" font-weight="600" letter-spacing="0.6"
+        fill="#6B7280">IF NOTHING ARRIVES</text>
+
+  <circle cx="30" cy="304" r="2.6" fill="#B45309"/>
+  <text x="42" y="307" font-size="10" fill="#374151">
+    Step 3 missing: the bus stays silent no matter what the sensor is doing.
+  </text>
+
+  <circle cx="30" cy="323" r="2.6" fill="#B45309"/>
+  <text x="42" y="326" font-size="10" fill="#374151">
+    One interrupt then silence: the BMP interrupt is latched by default, so read INT_STATUS or select pulsed mode.
+  </text>
+
+  <circle cx="30" cy="342" r="2.6" fill="#B45309"/>
+  <text x="42" y="345" font-size="10" fill="#374151">
+    Every register reads correct and nothing arrives: INT_CONFIG was written while the part was measuring.
+  </text>
+</svg>

@@ -333,6 +333,14 @@ class Bus:
         after = self.ibi_payload_cap(address)
         return before, after, after != before
 
+    def set_ibi_payload_cap(self, address, cap):
+        """Put a target's declared maximum IBI payload back to a given value."""
+        ok, response = self.try_call(self.device.i3cGETMRL, address)
+        payload = payload_of(response) if ok else None
+        read_length = ((payload[0] << 8) | payload[1]) if payload and len(payload) > 1 else 0x0010
+        self.try_call(self.device.i3cDirectSETMRL, address, read_length, cap)
+        return self.ibi_payload_cap(address)
+
     def accept_ibis(self, address, payload_length=8):
         from binhosupernova.commands.i3c.definitions import (
             TargetType, TargetInterruptRequest, ControllerRoleRequest,
@@ -571,6 +579,19 @@ class Profile:
         bus.write_reg(address, self.command_register, self.soft_reset_value, self)
         time.sleep(0.1)
         return True
+
+    # Motion-triggered interrupt, for parts that have one. Returns a short
+    # description of what the reader should do to trigger it, or None if the
+    # part has no such feature.
+    def arm_motion_interrupt(self, bus, address, threshold=2):
+        return None
+
+    def motion_sources(self, bus, address):
+        """Decode whatever source register the motion interrupt sets."""
+        return {}
+
+    def clear_motion_interrupt(self, bus, address):
+        return None
 
     def clear_latched_modes(self, bus, address):
         """Undo anything a CCC latched that a later run would inherit.
@@ -1136,6 +1157,54 @@ class Lsm6dsv(Profile):
             decoded["timestamp"] = hex_bytes(payload[1:4])
         return decoded
 
+    # Wake-up detection, which is the interrupt worth demonstrating because a
+    # tap on the board produces it. Everything except data-ready is gated by
+    # FUNCTIONS_ENABLE bit 7 and routed through MD1_CFG rather than INT1_CTRL.
+    INTERRUPTS_ENABLE_BIT = 1 << 7           # FUNCTIONS_ENABLE
+    SLOPE_FDS_BIT, LIR_BIT = 1 << 4, 1 << 0  # TAP_CFG0
+    INT1_WU_BIT = 1 << 5                     # MD1_CFG
+
+    def arm_motion_interrupt(self, bus, address, threshold=2):
+        # Threshold is in units of full scale / 64, so at +/- 2 g one count is
+        # about 31 mg. Two counts sits above the noise of a still board and
+        # below a deliberate tap, measured: silent at rest over 35 s.
+        bus.write_reg(address, self.INT1_CTRL, 0x00, self)
+        bus.write_reg(address, self.MD1_CFG, 0x00, self)
+        current, _ = bus.read_reg(address, self.CTRL3, self)
+        bus.write_reg(address, self.CTRL3, current | self.IF_INC, self)
+        bus.write_reg(address, self.CTRL8, 0x00, self)          # +/- 2 g
+        bus.write_reg(address, self.CTRL1, self.ODR_60HZ, self)
+        # Slope filter, and latch the interrupt so one event is one interrupt
+        # rather than a level the part keeps re-asserting.
+        bus.write_reg(address, self.TAP_CFG0,
+                      self.SLOPE_FDS_BIT | self.LIR_BIT, self)
+        bus.write_reg(address, self.WAKE_UP_THS, threshold & 0x3F, self)
+        bus.write_reg(address, self.WAKE_UP_DUR, 0x00, self)
+        bus.write_reg(address, self.FUNCTIONS_ENABLE,
+                      self.INTERRUPTS_ENABLE_BIT, self)
+        bus.write_reg(address, self.MD1_CFG, self.INT1_WU_BIT, self)
+        time.sleep(0.2)
+        bus.read_reg(address, self.ALL_INT_SRC, self)           # start cleared
+        return "tap or tilt the board"
+
+    def motion_sources(self, bus, address):
+        """Which axes triggered, read from WAKE_UP_SRC. Best effort.
+
+        Which *feature* fired is in the interrupt payload and needs no read at
+        all, so that is what the caller should report. The per-axis bits are
+        only in WAKE_UP_SRC, and with the interrupt latched and re-triggering
+        they can be cleared before the host gets to them, so a blank answer
+        here is normal and does not mean the interrupt was spurious.
+        """
+        wake, _ = bus.read_reg(address, self.WAKE_UP_SRC, self)
+        axes = [name for bit, name in ((0x04, "X"), (0x02, "Y"), (0x01, "Z"))
+                if wake & bit]
+        return {"axes": ",".join(axes) or "(cleared before the read)"}
+
+    def clear_motion_interrupt(self, bus, address):
+        bus.read_reg(address, self.ALL_INT_SRC, self)
+        return None
+
     def clear_latched_modes(self, bus, address):
         # SW_RESET clears IF_INC as well, so it has to be put back or the next
         # multi-byte read silently returns one register repeatedly.
@@ -1302,25 +1371,65 @@ def probe_identity(bus, address, profile):
 
 
 def probe_length_limits(bus, address):
-    """SETMWL / SETMRL: set a value and read it back."""
+    """SETMWL / SETMRL: set a value the part is not already holding, then put
+    it back.
+
+    The naive version of this test sends a fixed value and asks whether the
+    reported one changed. That fails twice over. A part already holding the
+    value is reported as not implementing the command, so a second run
+    disagrees with the first; and the value is left behind, which for MRL
+    means the maximum read length and the maximum IBI payload are both left
+    wherever the probe put them. The IBI payload one is load-bearing: an
+    interrupt longer than the adapter accepts is discarded silently, so a
+    probe that raises it can stop a later measurement seeing any interrupts
+    at all.
+
+    So this reads first, picks a trial value that differs from what is there,
+    and restores the original including MRL's IBI payload byte.
+    """
     out = []
-    for label, setter, getter, value in (
-            ("SETMWL / GETMWL", bus.device.i3cDirectSETMWL,
-             bus.device.i3cGETMWL, 64),
-            ("SETMRL / GETMRL", bus.device.i3cDirectSETMRL,
-             bus.device.i3cGETMRL, 32)):
-        ok_before, before = bus.try_call(getter, address)
-        bus.try_call(setter, address, value)
-        ok_after, after = bus.try_call(getter, address)
-        if not (ok_before and ok_after):
-            out.append((label, UNDETERMINED, "the getter did not answer"))
-            continue
-        b, a = payload_of(before), payload_of(after)
-        if a != b:
-            out.append((label, SUPPORTED, f"{b} then set {value} then {a}"))
+
+    def get(getter):
+        ok, response = bus.try_call(getter, address)
+        return payload_of(response) if ok else None
+
+    # ---- MWL, a single 16-bit value
+    before = get(bus.device.i3cGETMWL)
+    if before is None or len(before) < 2:
+        out.append(("SETMWL / GETMWL", UNDETERMINED, "GETMWL did not answer"))
+    else:
+        original = (before[0] << 8) | before[1]
+        trial = 0x0040 if original != 0x0040 else 0x0020
+        bus.try_call(bus.device.i3cDirectSETMWL, address, trial)
+        after = get(bus.device.i3cGETMWL)
+        got = ((after[0] << 8) | after[1]) if after and len(after) > 1 else None
+        if got == trial:
+            out.append(("SETMWL / GETMWL", SUPPORTED,
+                        f"{original} then set {trial} then {got}"))
         else:
-            out.append((label, NOT_IMPLEMENTED,
-                        f"{b} unchanged after setting {value}"))
+            out.append(("SETMWL / GETMWL", NOT_IMPLEMENTED,
+                        f"{original} unchanged after setting {trial}"))
+        bus.try_call(bus.device.i3cDirectSETMWL, address, original)
+
+    # ---- MRL, a 16-bit read length plus a maximum IBI payload byte
+    before = get(bus.device.i3cGETMRL)
+    if before is None or len(before) < 2:
+        out.append(("SETMRL / GETMRL", UNDETERMINED, "GETMRL did not answer"))
+        return out
+    original = (before[0] << 8) | before[1]
+    ibi_payload = before[2] if len(before) > 2 else None
+    trial = 0x0020 if original != 0x0020 else 0x0010
+    bus.try_call(bus.device.i3cDirectSETMRL, address, trial, ibi_payload)
+    after = get(bus.device.i3cGETMRL)
+    got = ((after[0] << 8) | after[1]) if after and len(after) > 1 else None
+    detail = f"{original} then set {trial} then {got}"
+    if ibi_payload is not None:
+        detail += f", maximum IBI payload {ibi_payload} throughout"
+    out.append(("SETMRL / GETMRL",
+                SUPPORTED if got == trial else NOT_IMPLEMENTED,
+                detail if got == trial else
+                f"{original} unchanged after setting {trial}"))
+    bus.try_call(bus.device.i3cDirectSETMRL, address, original, ibi_payload)
     return out
 
 
@@ -1479,6 +1588,27 @@ def probe_hdr(bus, address, profile, bcr):
     return out
 
 
+# SETXTIME 0xFF disables timing control. Measured on the BMP581: from a clean
+# 02 00 06 32, sub-command 0xDF sets byte 1 to 0x02 and 0xFF puts it back,
+# where 0x00 does nothing. That matters more than it looks, because the mode
+# it engages adds a timestamp to every in-band interrupt, and on a target
+# already near the adapter's eight byte interrupt limit that silently stops
+# interrupts being delivered at all.
+SETXTIME_DISABLE = 0xFF
+
+
+def timing_control_state(bus, address):
+    ok, response = bus.try_call(bus.device.i3cGETXTIME, address)
+    return payload_of(response) if ok else None
+
+
+def clear_timing_control(bus, address):
+    """Turn timing control off and report whether it went."""
+    bus.try_call(bus.device.i3cDirectSETXTIME, address, SETXTIME_DISABLE, [])
+    time.sleep(0.05)
+    return timing_control_state(bus, address)
+
+
 def probe_timing_exchange(bus, address):
     """SETXTIME changes a byte that GETXTIME reports, when it is implemented.
 
@@ -1486,48 +1616,90 @@ def probe_timing_exchange(bus, address):
     part is already in is correctly a no-op. Measured on the BMI323: from a
     GETXTIME of 03 00 0D 78, sub-command 0x3F moves byte 1 to 0x01 and then
     never moves it again, while 0xDF moves it to 0x03. So a probe that sends
-    one sub-command can only prove support once per power cycle. Try several,
-    and if none of them move the value say why rather than calling it no
-    observable effect.
+    one sub-command can only prove support once per power cycle.
+
+    That made the probe report a different answer on a second run than on a
+    first, which is a probe reporting its own history rather than the part.
+    It now disables timing control before it starts, so it always measures
+    from the same place, and puts the part back afterwards. Restoring matters
+    beyond tidiness here: the mode adds a timestamp to every in-band
+    interrupt, so a battery that leaves it engaged can stop a later run's
+    interrupts arriving at all.
     """
     SUBCOMMANDS = (0x3F, 0xDF, 0x1F, 0x5F, 0x7F)
-    ok_before, before = bus.try_call(bus.device.i3cGETXTIME, address)
-    if not ok_before:
+    entry = timing_control_state(bus, address)
+    if entry is None:
         return [("SETXTIME / GETXTIME", UNDETERMINED, "GETXTIME did not answer")]
-    baseline = payload_of(before)
+
+    baseline = clear_timing_control(bus, address) or entry
     current = baseline
+    verdict = None
     for subcommand in SUBCOMMANDS:
         bus.try_call(bus.device.i3cDirectSETXTIME, address, subcommand, [])
-        ok_after, after = bus.try_call(bus.device.i3cGETXTIME, address)
-        if not ok_after:
-            continue
-        value = payload_of(after)
+        value = timing_control_state(bus, address)
         if value and value != current:
-            return [("SETXTIME / GETXTIME", SUPPORTED,
-                     f"{hex_bytes(current)} then {hex_bytes(value)} after "
-                     f"SETXTIME 0x{subcommand:02X}")]
+            verdict = ("SETXTIME / GETXTIME", SUPPORTED,
+                       f"{hex_bytes(current)} then {hex_bytes(value)} after "
+                       f"SETXTIME 0x{subcommand:02X}")
+            break
         current = value or current
-    return [("SETXTIME / GETXTIME", UNDETERMINED,
-             f"{hex_bytes(baseline)} unmoved by sub-commands "
-             f"{', '.join(f'0x{s:02X}' for s in SUBCOMMANDS)}; the part may "
-             f"already be in the state they select, which a power cycle would "
-             f"reset")]
+
+    restored = clear_timing_control(bus, address)
+    put_back = restored == baseline
+    if verdict is None:
+        return [("SETXTIME / GETXTIME", UNDETERMINED,
+                 f"{hex_bytes(baseline)} unmoved by sub-commands "
+                 f"{', '.join(f'0x{s:02X}' for s in SUBCOMMANDS)}, from a "
+                 f"cleared start, so the part does not appear to implement it")]
+    detail = verdict[2] + ("; timing control disabled again afterwards"
+                           if put_back else
+                           f"; timing control could NOT be turned off again, "
+                           f"left at {hex_bytes(restored)}")
+    return [(verdict[0], verdict[1], detail)]
 
 
 def probe_no_observable(bus, address):
-    """Commands that complete but change nothing we can measure here."""
+    """Commands that complete but change nothing we can measure here.
+
+    Each command is sent twice and the second answer is the reported one. That
+    is not defensive padding. Measured on the LSM6DSV: ENTAS1 to ENTAS3 are
+    refused with I3C_NACK_ADDRESS on a settled part, reproducibly, over four
+    consecutive passes, after a power cycle, and with the accelerometer
+    running; but immediately after re-enumeration the same commands can be
+    acknowledged instead. A result code taken as the first traffic after ENTDAA
+    describes the enumeration rather than the target, the same way the PID
+    does, and the refusal AN0005's central finding rests on is the settled
+    behaviour rather than the first one.
+    """
     from binhosupernova.commands.i3c.definitions import (
         TransferDirection, I3cTargetResetDefByte)
     out = []
+    ATTEMPTS = 5
     for label, method, args in (
             ("ENTAS0", bus.device.i3cDirectENTAS0, (address,)),
             ("ENTAS1", bus.device.i3cDirectENTAS1, (address,)),
             ("ENTAS2", bus.device.i3cDirectENTAS2, (address,)),
             ("ENTAS3", bus.device.i3cDirectENTAS3, (address,))):
-        ok, response = bus.try_call(method, *args)
-        out.append((label, UNDETERMINED,
-                    f"returned {response.get('result') if ok else response}; "
-                    f"proving an activity state needs a current measurement"))
+        refused = 0
+        codes = []
+        for _ in range(ATTEMPTS):
+            ok, response = bus.try_call(method, *args)
+            code = response.get("result") if isinstance(response, dict) else None
+            if code != "SUCCESS":
+                refused += 1
+            codes.append(code or "refused")
+        # Two branches, keyed on whether the target ever refuses, because that
+        # is the question. How often it refuses is the measurement and it is
+        # not always the same number, so the wording must not depend on it.
+        if refused:
+            detail = (f"refused {refused} of {ATTEMPTS} attempts, so the target "
+                      f"does report this one, though not on every attempt")
+        else:
+            detail = (f"accepted {ATTEMPTS} of {ATTEMPTS} attempts; proving an "
+                      f"activity state needs a current measurement")
+        out.append((label, UNDETERMINED, detail))
+    bus.try_call(bus.device.i3cDirectRSTACT, address,
+                 I3cTargetResetDefByte.NO_RESET, TransferDirection.WRITE)
     ok, response = bus.try_call(bus.device.i3cDirectRSTACT, address,
                                 I3cTargetResetDefByte.NO_RESET,
                                 TransferDirection.WRITE)
@@ -1579,10 +1751,31 @@ def probe_ibi(bus, address, profile, seconds=3.0):
     out = []
     bus.quiesce(address)
     bus.accept_ibis(address)
+    # The declared payload has to fit what the adapter accepts or every
+    # interrupt is discarded with no error, and start_stream arranges that.
+    # Capture what the target asked for first, so the row below can report the
+    # negotiation and the cap can be put back at the end.
+    declared = bus.ibi_payload_cap(address)
+    timestamp = bus.ibi_timestamp_overhead(address)
     try:
         profile.start_stream(bus, address, route_ibi=True)
     except MemsError as exc:
         return [("IBI", UNDETERMINED, f"could not set the part up: {exc}")]
+
+    fitted = bus.ibi_payload_cap(address)
+    budget = bus.MAX_IBI_PAYLOAD - timestamp
+    if declared is not None and fitted is not None and fitted != declared:
+        out.append(("IBI payload negotiation", SUPPORTED,
+                    f"the target declared {declared} byte(s), the adapter takes "
+                    f"{bus.MAX_IBI_PAYLOAD}"
+                    + (f" less {timestamp} for the timing-control timestamp"
+                       if timestamp else "")
+                    + f", so it was asked for {fitted}; without this every "
+                      f"interrupt is discarded and nothing reports it"))
+    elif declared is not None:
+        out.append(("IBI payload negotiation", SUPPORTED,
+                    f"the target declared {declared} byte(s), within the "
+                    f"{budget} the adapter takes, so nothing had to change"))
 
     bus.drain_ibis(settle=0.05)
     before = len(bus.collect_ibis(0.7))
@@ -1605,6 +1798,9 @@ def probe_ibi(bus, address, profile, seconds=3.0):
     elapsed = time.monotonic() - started
     rate = len(got) / elapsed if elapsed else 0.0
     expected = profile.expected_ibi_rate()
+
+    if declared is not None and bus.ibi_payload_cap(address) != declared:
+        bus.set_ibi_payload_cap(address, declared)
 
     if got:
         detail = f"{len(got)} in {elapsed:.2f} s = {rate:.2f}/s"
@@ -1839,9 +2035,17 @@ def cmd_ibi(args):
         address, _ = find_target(bus, profile)
         bus.quiesce(address)
         bus.accept_ibis(address)
+        # start_stream lowers the declared IBI payload if the target asks for
+        # more than the adapter takes. That has to be put back, or this command
+        # changes what the next one measures.
+        declared = bus.ibi_payload_cap(address)
         profile.start_stream(bus, address, route_ibi=True)
+        fitted = bus.ibi_payload_cap(address)
         print(f"{profile.name} at 0x{address:02X}: interrupt routed to the I3C "
               f"IBI, {profile.interrupt_mode()}")
+        if declared is not None and fitted != declared:
+            print(f"  the target declared a {declared} byte interrupt payload "
+                  f"and was asked for {fitted}, which is what the adapter takes")
         bus.drain_ibis(settle=0.05)
         bus.try_call(bus.device.i3cDirectENEC, address, [ENEC.ENINT])
 
@@ -1875,6 +2079,9 @@ def cmd_ibi(args):
         print("  the rate is comparable with the configured rate; individual "
               "arrival times are not, because USB coalesces them")
 
+        if declared is not None and bus.ibi_payload_cap(address) != declared:
+            bus.set_ibi_payload_cap(address, declared)
+
         attempts = bus.stop_ibis(address)
         if attempts is None:
             print("  warning: the interrupts were still arriving after four "
@@ -1883,6 +2090,63 @@ def cmd_ibi(args):
             print(f"  the interrupts stopped after {attempts} DISEC attempts, "
                   f"not one")
         profile.stop_stream(bus, address)
+    return 0
+
+
+def cmd_wake(args):
+    """Arm a motion interrupt and report each one as it arrives."""
+    from binhosupernova.commands.i3c.definitions import ENEC, DISEC
+    profile = make_profile(args.device, latched=args.latched)
+    with open_bus(args) as bus:
+        address, _ = find_target(bus, profile)
+        bus.quiesce(address)
+        info = bus.enable_ibis(address)
+        prompt = profile.arm_motion_interrupt(bus, address,
+                                              threshold=args.threshold)
+        if prompt is None:
+            print(f"{profile.name} has no motion interrupt in this profile")
+            return 1
+        if info.get("changed"):
+            print(f"  interrupt payload: the target asked for "
+                  f"{info['payload_cap_before']} bytes and was given "
+                  f"{info['payload_cap_after']}, which is what the adapter takes")
+        print(f"{profile.name} at 0x{address:02X}: wake-up armed at threshold "
+              f"{args.threshold}, routed to the I3C in-band interrupt")
+        print(f"\n  {prompt.upper()}. Listening for {args.seconds:g} s.\n")
+
+        bus.drain_ibis(settle=0.05)
+        bus.try_call(bus.device.i3cDirectENEC, address, [ENEC.ENINT])
+        got = []
+        started = time.monotonic()
+        end = started + args.seconds
+        while time.monotonic() < end:
+            batch = bus.collect_ibis(0.2)
+            for notification in batch:
+                when = time.monotonic() - started
+                payload = payload_of(notification)
+                sources = profile.motion_sources(bus, address)
+                profile.clear_motion_interrupt(bus, address)
+                got.append((when, payload, sources))
+                if len(got) <= args.show:
+                    # The feature comes from the payload, which is race free.
+                    # The axes come from a register and may already be cleared.
+                    decoded = profile.decode_payload(payload)
+                    fired = [name for name, value in decoded.items() if value == 1]
+                    print(f"  t={when:6.2f}s  MDB {hex_bytes(payload[:1])}  "
+                          f"payload says {', '.join(fired) or 'no source bit'}"
+                          f"   axes {sources.get('axes')}")
+            if len(batch) / 0.2 > 200:
+                print("  interrupt rate looks like a storm; disarming")
+                break
+        bus.try_call(bus.device.i3cDirectDISEC, address, [DISEC.DISINT])
+        elapsed = time.monotonic() - started
+
+        print(f"\n  {len(got)} wake-up interrupt(s) in {elapsed:.1f} s")
+        if not got:
+            print("  nothing arrived. A still board should not trigger this, so "
+                  "tap it harder or lower --threshold")
+        profile.stop_stream(bus, address)
+        bus.stop_ibis(address)
     return 0
 
 
@@ -2165,6 +2429,16 @@ def build_parser():
     add_device(sub)
     sub.add_argument("--seconds", type=float, default=3.0,
                      help="how long to count interrupts for")
+
+    sub = add("wake", cmd_wake,
+              "arm a motion interrupt and report each one that arrives")
+    add_device(sub)
+    sub.add_argument("--seconds", type=float, default=20.0,
+                     help="how long to listen for")
+    sub.add_argument("--threshold", type=int, default=2,
+                     help="wake-up threshold in units of full scale / 64")
+    sub.add_argument("--show", type=int, default=10,
+                     help="how many individual interrupts to print")
 
     sub = add("rates", cmd_rates, "find the highest error-free bus rate")
     add_device(sub)
