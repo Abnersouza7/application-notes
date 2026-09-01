@@ -18,7 +18,8 @@ Every note is published in three places:
 | [AN0001](AN0001-programming-stm32-over-i3c/) | Programming STM32 microcontrollers over I3C with the Binho Supernova | 1.0 | [PDF](https://cdn.binho.io/application-notes/AN0001/AN0001.pdf) · [ZIP](https://cdn.binho.io/application-notes/AN0001/AN0001-assets.zip) |
 | [AN0002](AN0002-programming-stm32-over-i2c/) | Programming STM32 microcontrollers over I2C with the Binho Pulsar | 1.0 | [PDF](https://cdn.binho.io/application-notes/AN0002/AN0002.pdf) · [ZIP](https://cdn.binho.io/application-notes/AN0002/AN0002-assets.zip) |
 | [AN0003](AN0003-programming-stm32-over-spi/) | Programming STM32 microcontrollers over SPI with the Binho Pulsar | 1.0 | [PDF](https://cdn.binho.io/application-notes/AN0003/AN0003.pdf) · [ZIP](https://cdn.binho.io/application-notes/AN0003/AN0003-assets.zip) |
-| [AN0004](AN0004-evaluating-bosch-mems-over-i3c/) | Evaluating Bosch Sensortec MEMS sensors over I3C with the Binho Supernova | 1.0 | [PDF](https://cdn.binho.io/application-notes/AN0004/AN0004.pdf) · [ZIP](https://cdn.binho.io/application-notes/AN0004/AN0004-assets.zip) |
+| [AN0004](AN0004-evaluating-bosch-mems-over-i3c/) | Interfacing Bosch Sensortec MEMS sensors over I3C with the Binho Supernova | 2.0 | [PDF](https://cdn.binho.io/application-notes/AN0004/AN0004.pdf) · [ZIP](https://cdn.binho.io/application-notes/AN0004/AN0004-assets.zip) |
+| [AN0005](AN0005-stmicro-mems-over-i3c/) | Interfacing STMicroelectronics MEMS sensors over I3C with the Binho Supernova | 1.0 | [PDF](https://cdn.binho.io/application-notes/AN0005/AN0005.pdf) · [ZIP](https://cdn.binho.io/application-notes/AN0005/AN0005-assets.zip) |
 
 ## Repository layout
 

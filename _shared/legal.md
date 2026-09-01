@@ -9,9 +9,10 @@ note: |
   moved out of this file into a 'trademarks' field in each note's front matter,
   because the brands a note references vary by note. The rendered text of AN0001,
   AN0002 and AN0003 is byte-identical to the approved version, verified against
-  the previously built PDFs. AN0004 carries a new list naming Bosch Sensortec.
-  Two things need confirming: that a per-note list is acceptable, and that the
-  Bosch entity attribution in AN0004 is correct.
+  the previously built PDFs. AN0004 names Bosch Sensortec and Robert Bosch GmbH,
+  and AN0005 names STMicroelectronics N.V.; each note names only the brands it
+  references. Two things need confirming: that a per-note list is acceptable, and
+  that the vendor entity attributions are correct.
 ---
 
 #### Definitions
