@@ -9,7 +9,7 @@ bmi323 at <addr>, adapter rates PUSH_PULL_5_MHZ_50_DC / OPEN_DRAIN_1_MHZ at 3300
   control: refusal reporting  supported         GETPID, SETMWL and a private read at the unoccupied address <addr> were all refused, so a SUCCESS above means the target accepted the command
   SETMWL / GETMWL             not implemented   [0, 0] unchanged after setting 64
   SETMRL / GETMRL             not implemented   [0, 0] unchanged after setting 32
-  SETGRPA / RSTGRPA           not implemented   0x20 still does not answer after the command
+  SETGRPA / RSTGRPA           not implemented   write to <addr> through 0x20: before refused, assigned refused, released refused
   HDR modes                   not implemented   BCR bit 5 clear, so the target declares SDR only
   GETHDRCAP (0x95)            not implemented   answers 00, so no HDR modes
   HDR-DDR read attempt        undetermined      returned SUCCESS, which is not diagnostic; bus intact afterwards
@@ -28,8 +28,9 @@ bmi323 at <addr>, adapter rates PUSH_PULL_5_MHZ_50_DC / OPEN_DRAIN_1_MHZ at 3300
   SETXTIME / GETXTIME         supported         <before> then <after> after SETXTIME <subcommand>
   SETNEWDA                    supported         moved 0x08 to <addr> and the old address stopped answering
   RSTDAA                      supported         the table dropped to [<addrs>] and 0x0A stopped answering
-  the part was soft reset afterwards, to undo the modes this battery latched
+  the part was reset afterwards, to undo the modes this battery latched
   <counts>
   a verdict of undetermined means the command completed and nothing measurable changed.
-  it is not a no: on this bus a target accepts and discards commands it does not implement,
-  so a result code alone is never evidence of support.
+  it is not a no: some targets accept and discard commands they do not implement
+  and some refuse them, and which one a target does is a property of that target.
+  So a success alone is never evidence of support, because a refusal is not guaranteed to arrive.

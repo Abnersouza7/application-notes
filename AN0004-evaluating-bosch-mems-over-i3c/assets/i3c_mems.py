@@ -33,7 +33,7 @@ import sys
 import time
 from collections import Counter
 
-TOOL_VERSION = "1.0"
+TOOL_VERSION = "1.1"
 
 # --------------------------------------------------------------------------
 # Errors
@@ -211,11 +211,27 @@ class Bus:
             self.call(self.device.i3cControllerSetParameters, *rates)
         self.rates = (push_pull, open_drain, drive, voltage_mv)
 
-    def init_bus(self):
-        """RSTDAA then ENTDAA. Returns the target table."""
-        self.call(self.device.i3cControllerInitBus, timeout=10.0,
-                  allowed=("I3C_BUS_INIT_NACK_RSTDAA", "I3C_BUS_INIT_NACK_SETDASA",
-                           "I3C_BUS_INIT_NACK_SETAASA", "I3C_BUS_INIT_NACK_ENTDAA"))
+    ALLOW_INIT = ("I3C_BUS_INIT_NACK_RSTDAA", "I3C_BUS_INIT_NACK_SETDASA",
+                  "I3C_BUS_INIT_NACK_SETAASA", "I3C_BUS_INIT_NACK_ENTDAA")
+
+    def init_bus(self, recover=True):
+        """RSTDAA then ENTDAA. Returns the target table.
+
+        Swapping the part in the socket leaves the bus in a state ENTDAA
+        cannot drive out of, and the call comes back BUS_TIMEOUT. A software
+        power cycle clears it every time it has been seen. Doing that here
+        rather than in the caller, because every probe script had grown the
+        same four lines around this call.
+        """
+        try:
+            self.call(self.device.i3cControllerInitBus, timeout=10.0,
+                      allowed=self.ALLOW_INIT)
+        except MemsError as exc:
+            if not recover or "BUS_TIMEOUT" not in str(exc):
+                raise
+            self.power_cycle()
+            self.call(self.device.i3cControllerInitBus, timeout=10.0,
+                      allowed=self.ALLOW_INIT)
         return self.table()
 
     def table(self):
@@ -240,6 +256,27 @@ class Bus:
                 "pendingReadCapability": PendingReadCapability.DISABLE_AUTOMATIC_READ,
                 "maxIbiPayloadLength": payload_length,
             })
+
+    def power_cycle(self, settle=1.5, voltage_mv=3300):
+        """Collapse the I3C rail and bring it back, power-cycling the target.
+
+        The adapter sources the bus rail, so handing that job to a
+        non-existent external supply drops it. This is the only recovery that
+        worked on an LSM6DSV whose anti-spike filter bit had been set: with the
+        filters forced on, the part still answered ENTDAA at open-drain speed
+        and refused every push-pull private transfer, and neither a slower
+        rate, nor addressing it as a legacy I2C target, nor the I3C target
+        reset pattern brought it back.
+
+        Worth having for its own sake: a target left in a state no bus command
+        can reach is otherwise a trip to the bench, and this makes exploring an
+        undocumented register map recoverable.
+        """
+        self.call(self.device.useExternalI3cVoltage)
+        time.sleep(settle)
+        self.call(self.device.setI3cVoltage, voltage_mv)
+        time.sleep(0.5)
+        return True
 
     def stop_ibis(self, address, attempts=4, settle=0.2, window=0.5):
         """Disable the target's IBI and confirm it actually stopped.
@@ -302,14 +339,32 @@ class Bus:
 
     # -- IBI collection ----------------------------------------------------
 
-    def drain_ibis(self):
+    def drain_ibis(self, settle=0.0):
+        """Empty the notification queue before a measurement window starts.
+
+        A plain drain is not enough to start a window cleanly. An interrupt the
+        target raised before the drain can still be in flight over USB, and it
+        then lands in the queue after the drain and is counted inside the
+        window even though it happened outside it. That biases every short
+        measurement high by one.
+
+        Measured on the BMP581, whose true rate is 10.09/s: a 2 s window read
+        21 interrupts on six runs out of eight and 22 on the other two, where
+        20.2 is expected. Over 20 s the same code reports 10.09/s, because one
+        spurious interrupt is 0.5% there and 5% here. Passing a settle drains,
+        waits for anything already in transit, and drains again.
+        """
         drained = 0
-        while True:
-            try:
-                self.ibis.get_nowait()
-                drained += 1
-            except queue.Empty:
-                return drained
+        for pass_number in range(2 if settle else 1):
+            if pass_number:
+                time.sleep(settle)
+            while True:
+                try:
+                    self.ibis.get_nowait()
+                    drained += 1
+                except queue.Empty:
+                    break
+        return drained
 
     def collect_ibis(self, seconds, on_each=None):
         end = time.monotonic() + seconds
@@ -358,6 +413,12 @@ class Profile:
     # registers worth dumping in the note's reference section
     registers = ()
 
+    # A read/write register the group-address probe can scribble on and put
+    # back. It has to be one whose value does not change what the part is
+    # doing while the probe holds a different value in it for a few
+    # milliseconds. Per part, because there is no register every part shares.
+    scratch_register = None
+
     def start_stream(self, bus, address, route_ibi=False):
         """Configure the part and put it into its measurement mode.
 
@@ -400,10 +461,28 @@ class Profile:
         time.sleep(0.1)
         return True
 
+    def clear_latched_modes(self, bus, address):
+        """Undo anything a CCC latched that a later run would inherit.
+
+        SETXTIME is the one that matters: it changes the interrupt payload and
+        it survives both a host restart and a bus reset, so a battery that
+        runs it leaves the next battery measuring a different part than it
+        thinks. A soft reset is what undoes it where one exists.
+        """
+        return self.soft_reset(bus, address)
+
     def expected_ibi_rate(self):
         return None
 
     def decode_mdb(self, byte):
+        return {}
+
+    def decode_payload(self, payload):
+        """Decode the bytes after the mandatory data byte, if they mean anything.
+
+        Most parts here send only the mandatory data byte. The LPS22DF sends
+        five, and the fourth is its STATUS register.
+        """
         return {}
 
 
@@ -440,6 +519,10 @@ class Bmi323(Profile):
 
     # INT_MAP2.acc_drdy_int occupies bits 11:10 and takes 0b11 for the I3C IBI
     MAP_ACC_DRDY_TO_IBI = 0b11 << 10
+
+    # Interrupt mapping does nothing while no interrupt is enabled, and the
+    # group-address probe restores it.
+    scratch_register = 0x3B
 
     registers = ((0x00, "CHIP_ID"), (0x01, "ERR_REG"), (0x02, "STATUS"),
                  (0x03, "ACC_DATA_X"), (0x04, "ACC_DATA_Y"), (0x05, "ACC_DATA_Z"),
@@ -526,6 +609,10 @@ class Bmp58x(Profile):
     INT_MODE_LATCHED = 1 << 0
     INT_EN = 1 << 3
     INT_CONFIG_RESET = 0x35                 # int_mode = 1, so latched by default
+
+    # Oversampling, which start_stream sets anyway and which changes nothing
+    # while the part is in standby.
+    scratch_register = 0x36
 
     observable = ("breathe on it or lift it and the pressure changes; "
                   "about 12 Pa per meter of altitude")
@@ -647,10 +734,158 @@ class Bmp585(Bmp58x):
                   "the gel is survivable where the BMP581 would not be")
 
 
+class Lps22df(Profile):
+    """LPS22DF, on the STEVAL-MKI224V1A.
+
+    The only part across both notes whose datasheet publishes what each CCC
+    should return, and all eight matched. Its DCR is 0x62, the same value the
+    BMP581 and BMP585 report, because DCR names a device class and not a part.
+
+    Data-ready is a level here, not a pulse. Enabling it delivers one in-band
+    interrupt and then silence, because the level stays asserted until the
+    sample is read and the target has no edge left to interrupt with. Two
+    fixes work and agree to the sample: read the data after each interrupt, or
+    set DRDY_PLS so the part emits a pulse instead. start_stream takes the
+    pulsed path by default for the same reason Bmp58x does.
+    """
+    name = "lps22df"
+    vendor = "STMicroelectronics"
+    kind = "barometric pressure sensor"
+
+    data_width = 1
+    read_dummy = 0
+
+    chip_id_register = 0x0F                  # WHO_AM_I
+    chip_id_expected = 0xB4
+    device_id_expected = 0x00B4
+    bcr_expected = 0x07
+    dcr_expected = 0x62                      # same class as the BMP58x
+
+    INTERRUPT_CFG = 0x0B
+    IF_CTRL = 0x0E
+    WHO_AM_I = 0x0F
+    CTRL_REG1, CTRL_REG2, CTRL_REG3, CTRL_REG4 = 0x10, 0x11, 0x12, 0x13
+    I3C_IF_CTRL_ADD = 0x19
+    RPDS_L, RPDS_H = 0x1A, 0x1B
+    INT_SOURCE, STATUS = 0x24, 0x27
+    PRESS_OUT_XL, TEMP_OUT_L = 0x28, 0x2B
+
+    ODR_10HZ = 0x18                          # CTRL_REG1 ODR[3:0] = 0011
+    ODR_HZ = 10.0
+    DRDY = 1 << 5                            # CTRL_REG4 bit 5
+    DRDY_PLS = 1 << 6                        # bit 6, about a 5 us pulse
+    STATIC_ADDRESS = 0x5C                    # datasheet section 7.2, measured
+
+    # Pressure offset. Nothing else reads it, and the probe puts it back.
+    scratch_register = 0x1A
+
+    observable = ("breathe on it or lift it and the pressure changes; "
+                  "about 12 Pa per meter of altitude")
+
+    registers = ((0x0B, "INTERRUPT_CFG"), (0x0E, "IF_CTRL"), (0x0F, "WHO_AM_I"),
+                 (0x10, "CTRL_REG1"), (0x11, "CTRL_REG2"), (0x12, "CTRL_REG3"),
+                 (0x13, "CTRL_REG4"), (0x19, "I3C_IF_CTRL_ADD"),
+                 (0x24, "INT_SOURCE"), (0x27, "STATUS"),
+                 (0x28, "PRESS_OUT_XL"), (0x2B, "TEMP_OUT_L"))
+
+    def __init__(self, latched=False):
+        # latched keeps the part's own level behaviour and relies on
+        # clear_interrupt reading the data. False uses DRDY_PLS. Both reach
+        # the full rate; the names match Bmp58x so the harness can drive
+        # either vendor's pressure sensor the same way.
+        self.latched = latched
+
+    def start_stream(self, bus, address, route_ibi=False):
+        bus.write_reg(address, self.CTRL_REG4, 0x00, self)
+        bus.write_reg(address, self.CTRL_REG1, self.ODR_10HZ, self)
+        time.sleep(0.2)
+        bus.read_regs(address, self.PRESS_OUT_XL, 5, self)   # start data-ready clear
+        if route_ibi:
+            value = self.DRDY if self.latched else (self.DRDY | self.DRDY_PLS)
+            bus.write_reg(address, self.CTRL_REG4, value, self)
+        return True
+
+    def stop_stream(self, bus, address):
+        bus.write_reg(address, self.CTRL_REG4, 0x00, self)
+        bus.write_reg(address, self.CTRL_REG1, 0x00, self)
+        return True
+
+    def read_sample(self, bus, address):
+        raw, _ = bus.read_regs(address, self.PRESS_OUT_XL, 5, self)
+        pressure = raw[0] | (raw[1] << 8) | (raw[2] << 16)
+        if pressure & 0x800000:
+            pressure -= 0x1000000
+        temperature = raw[3] | (raw[4] << 8)
+        if temperature & 0x8000:
+            temperature -= 0x10000
+        return [("pressure", pressure / 4096.0, "hPa"),
+                ("temperature", temperature / 100.0, "C")]
+
+    def route_interrupt_to_ibi(self, bus, address):
+        value = self.DRDY if self.latched else (self.DRDY | self.DRDY_PLS)
+        bus.write_reg(address, self.CTRL_REG4, value, self)
+        return True
+
+    def clear_interrupt(self, bus, address):
+        # Reading pressure and temperature together clears both data-ready
+        # flags and both overrun flags. Reading only the pressure leaves T_OR
+        # to set, which shows up in the interrupt payload.
+        if self.latched:
+            bus.read_regs(address, self.PRESS_OUT_XL, 5, self)
+        return None
+
+    def interrupt_mode(self):
+        return ("data-ready as a level, cleared by reading the sample"
+                if self.latched else
+                "data-ready pulsed through CTRL_REG4.DRDY_PLS")
+
+    def clear_latched_modes(self, bus, address):
+        # CTRL_REG2.SWRESET, measured as enough to undo SETXTIME 0xDF: the
+        # payload goes back from eight bytes to five and GETXTIME byte 1
+        # returns to 0x00. The bit self-clears when the reset completes.
+        bus.write_reg(address, self.CTRL_REG2, 0x04, self)
+        time.sleep(0.3)
+        return True
+
+    def expected_ibi_rate(self):
+        return self.ODR_HZ
+
+    def decode_mdb(self, byte):
+        return {"mandatory data byte": f"0x{byte:02X}"}
+
+    # The interrupt payload is the mandatory data byte, then a three-byte
+    # timestamp only when timing control is engaged, then a four-byte tail
+    # whose third byte is the STATUS register. Bit 7 of the mandatory data
+    # byte says whether the timestamp is there, so the STATUS byte moves
+    # between offset 3 and offset 6 depending on a mode a CCC can latch.
+    MDB_TIMESTAMP = 1 << 7
+    STATUS_OFFSET, STATUS_OFFSET_TIMESTAMPED = 3, 6
+
+    def decode_payload(self, payload):
+        """Pull STATUS out of the interrupt payload, wherever it currently is.
+
+        Confirmed by prediction in both layouts: reading only the pressure
+        between interrupts lets T_OR set and the byte follows; reading
+        pressure and temperature holds it at 0x03 indefinitely.
+        """
+        offset = (self.STATUS_OFFSET_TIMESTAMPED
+                  if payload and payload[0] & self.MDB_TIMESTAMP
+                  else self.STATUS_OFFSET)
+        if len(payload) <= offset:
+            return {}
+        status = payload[offset]
+        decoded = {"T_OR": (status >> 5) & 1, "P_OR": (status >> 4) & 1,
+                   "T_DA": (status >> 1) & 1, "P_DA": status & 1}
+        if offset == self.STATUS_OFFSET_TIMESTAMPED:
+            decoded["timestamp"] = hex_bytes(payload[1:4])
+        return decoded
+
+
 PROFILES = {
     "bmi323": Bmi323,
     "bmp581": Bmp581,
     "bmp585": Bmp585,
+    "lps22df": Lps22df,
 }
 
 
@@ -660,7 +895,7 @@ def make_profile(name, latched=False):
     except KeyError:
         raise MemsError(f"unknown device {name!r}. Known: "
                         f"{', '.join(sorted(PROFILES))}")
-    if issubclass(cls, Bmp58x):
+    if issubclass(cls, (Bmp58x, Lps22df)):
         return cls(latched=latched)
     return cls()
 
@@ -722,7 +957,17 @@ def settle_after_enumeration(bus, address, profile):
     The datasheets ask for this directly: "Depending on the interface
     configuration, a dummy read should be the first access to the device."
     Two reads, not one, because read 2 was still unsettled in 2 of 8 trials.
+
+    The settling reads have to be GETPID, because GETPID is the observable
+    that was measured to need them. An earlier version of this function did
+    two register reads instead, which is a different transaction, and the
+    BMP585 went on reporting an unsettled PID through it: the features battery
+    called this and still reported bit 12 clear. Register reads are done as
+    well, since a part may want a dummy read on the register path too, but
+    they are not what fixes the PID.
     """
+    for _ in range(2):
+        bus.try_call(bus.device.i3cGETPID, address)
     for _ in range(2):
         try:
             bus.read_reg(address, profile.chip_id_register, profile)
@@ -815,25 +1060,97 @@ def probe_length_limits(bus, address):
 
 
 def probe_group_address(bus, address, profile, group=0x20):
-    """SETGRPA: if the group address were assigned, the target would answer to it."""
-    def answers(at):
-        try:
-            bus.read_reg(at, profile.chip_id_register, profile)
-            return True
-        except MemsError:
-            return False
+    """SETGRPA, tested as a write, because that is what a group address is for.
 
-    if answers(group):
-        return [("SETGRPA", UNDETERMINED,
-                 f"0x{group:02X} already answered before the command")]
-    bus.try_call(bus.device.i3cDirectSETGRPA, address, group)
-    got = answers(group)
-    bus.try_call(bus.device.i3cDirectRSTGRPA, address)
-    if got:
-        return [("SETGRPA / RSTGRPA", SUPPORTED,
-                 f"the target answered at group address 0x{group:02X}")]
-    return [("SETGRPA / RSTGRPA", NOT_IMPLEMENTED,
-             f"0x{group:02X} still does not answer after the command")]
+    The obvious test is to read a register at the group address and see
+    whether the target answers. That test is wrong, and it gave the wrong
+    answer for AN0004. A group address exists so a controller can address
+    several targets at once. A read from one has no defined answer, because
+    several targets would drive the reply together, so a target may implement
+    group addressing perfectly and still refuse a group-address read. Measured
+    on the LPS22DF: group writes land while the group is assigned and the
+    group-address read is refused throughout.
+
+    So this writes a register through the group address and reads it back at
+    the target's own dynamic address. Three points, because one is not enough:
+    the write must fail before SETGRPA, land after it, and fail again after
+    RSTGRPA. Anything else is not a working group address.
+    """
+    from binhosupernova.commands.i3c.definitions import TransferMode
+
+    register = profile.scratch_register
+    if register is None:
+        return [("SETGRPA / RSTGRPA", UNDETERMINED,
+                 f"no scratch register defined for the {profile.name} profile, "
+                 f"so there is nothing safe to write through the group address")]
+
+    saved, _ = bus.read_reg(address, register, profile)
+
+    # The trial value has to survive a round trip at the target's own dynamic
+    # address, or the test cannot tell a refused group write from a value the
+    # register would not have held anyway. Measured on the BMP581, where
+    # OSR_CONFIG takes 0x5A verbatim but turns 0xA5 into 0x25 because bit 7 is
+    # not writable: picking the wrong candidate would report a false negative.
+    # So the candidates are tried at the dynamic address first, and the test
+    # refuses to run rather than guess if none of them round-trips.
+    high = saved & ~0xFF if profile.data_width > 1 else 0
+    trial = None
+    for candidate in (0x5A, 0xA5, 0x33, 0x0F):
+        candidate |= high
+        if candidate == saved:
+            continue
+        bus.write_reg(address, register, candidate, profile)
+        time.sleep(0.02)
+        back, _ = bus.read_reg(address, register, profile)
+        if back == candidate:
+            trial = candidate
+            break
+    bus.write_reg(address, register, saved, profile)
+    if trial is None:
+        return [("SETGRPA / RSTGRPA", UNDETERMINED,
+                 f"no trial value survived a write to 0x{register:02X} at the "
+                 f"target's own address, so a refused group write would not be "
+                 f"distinguishable from a register that ignores the value")]
+
+    def write_through_group():
+        ok, _ = bus.try_call(
+            bus.device.i3cControllerWrite, group, TransferMode.I3C_SDR,
+            [register], list(trial.to_bytes(profile.data_width, "little")))
+        time.sleep(0.05)
+        landed = bus.read_reg(address, register, profile)[0] == trial
+        bus.write_reg(address, register, saved, profile)
+        return landed
+
+    try:
+        before = write_through_group()
+        bus.try_call(bus.device.i3cDirectSETGRPA, address, group)
+        during = write_through_group()
+        try:
+            bus.read_reg(group, profile.chip_id_register, profile)
+            read_answers = True
+        except MemsError:
+            read_answers = False
+        bus.try_call(bus.device.i3cDirectRSTGRPA, address)
+        after = write_through_group()
+    finally:
+        bus.write_reg(address, register, saved, profile)
+
+    detail = (f"write to 0x{register:02X} through 0x{group:02X}: "
+              f"before {'landed' if before else 'refused'}, "
+              f"assigned {'landed' if during else 'refused'}, "
+              f"released {'landed' if after else 'refused'}")
+    if before:
+        return [("SETGRPA / RSTGRPA", UNDETERMINED,
+                 detail + f"; 0x{group:02X} accepted writes before the command, "
+                          f"so the test cannot attribute them to the group")]
+    if during and not after:
+        return [("SETGRPA / RSTGRPA", SUPPORTED, detail),
+                ("read at the group address", NOT_IMPLEMENTED if not read_answers
+                 else SUPPORTED,
+                 "refused while group addressing was working, which is correct "
+                 "and is why a read is not a valid test"
+                 if not read_answers else "the target also answered a read")]
+    return [("SETGRPA / RSTGRPA", NOT_IMPLEMENTED, detail)]
 
 
 def probe_new_address(bus, address, profile):
@@ -1002,7 +1319,7 @@ def probe_ibi(bus, address, profile, seconds=3.0):
     except MemsError as exc:
         return [("IBI", UNDETERMINED, f"could not set the part up: {exc}")]
 
-    bus.drain_ibis()
+    bus.drain_ibis(settle=0.05)
     before = len(bus.collect_ibis(0.7))
     out.append(("IBI before ENEC",
                 NOT_IMPLEMENTED if before == 0 else UNDETERMINED,
@@ -1010,7 +1327,7 @@ def probe_ibi(bus, address, profile, seconds=3.0):
                 + ("" if before == 0 else ", so something enabled them early")))
 
     ok, response = bus.try_call(bus.device.i3cDirectENEC, address, [ENEC.ENINT])
-    bus.drain_ibis()
+    bus.drain_ibis(settle=0.05)
     started = time.monotonic()
     got = bus.collect_ibis(seconds,
                            on_each=lambda _n: profile.clear_interrupt(bus, address))
@@ -1031,8 +1348,11 @@ def probe_ibi(bus, address, profile, seconds=3.0):
                              profile.decode_mdb(first[0]).items())
             detail = f"0x{first[0]:02X}: {bits}"
             if len(first) > 1:
+                decoded = profile.decode_payload(first)
                 detail += (f"; followed by {len(first) - 1} further byte(s) "
-                           f"{hex_bytes(first[1:])}, not decoded here")
+                           f"{hex_bytes(first[1:])}")
+                detail += (", " + ", ".join(f"{k}={v}" for k, v in decoded.items())
+                           if decoded else ", not decoded by this profile")
             out.append(("IBI mandatory data byte", SUPPORTED, detail))
         out.append(("IBI payloads seen", SUPPORTED, str(dict(payloads))))
     else:
@@ -1251,7 +1571,7 @@ def cmd_ibi(args):
         profile.start_stream(bus, address, route_ibi=True)
         print(f"{profile.name} at 0x{address:02X}: interrupt routed to the I3C "
               f"IBI, {profile.interrupt_mode()}")
-        bus.drain_ibis()
+        bus.drain_ibis(settle=0.05)
         bus.try_call(bus.device.i3cDirectENEC, address, [ENEC.ENINT])
 
         shown = [0]
@@ -1321,6 +1641,34 @@ def cmd_reset(args):
     return 0
 
 
+def cmd_power_cycle(args):
+    """Power-cycle the target through the adapter's own rail control."""
+    with open_bus(args) as bus:
+        print(f"  dropping the I3C rail for {args.settle:g} s")
+        bus.power_cycle(settle=args.settle, voltage_mv=args.voltage)
+        print(f"  rail back at {args.voltage} mV")
+        bus.configure(voltage_mv=args.voltage, push_pull=args.push_pull,
+                      open_drain=args.open_drain, drive=args.drive)
+        table = bus.init_bus()
+        if not table:
+            print("  nothing enumerated afterwards")
+            return 1
+        for entry in table:
+            print(f"  enumerated 0x{entry['dynamic_address']:02X}  "
+                  f"pid {hex_bytes(entry['pid'])}")
+        if getattr(args, "device", None):
+            profile = make_profile(args.device, latched=args.latched)
+            address = table[0]["dynamic_address"]
+            settle_after_enumeration(bus, address, profile)
+            value, _ = bus.read_reg(address, profile.chip_id_register, profile)
+            masked = value & profile.chip_id_mask
+            ok = masked == profile.chip_id_expected
+            print(f"  {profile.name} chip id 0x{masked:02X}, expected "
+                  f"0x{profile.chip_id_expected:02X}: {'match' if ok else 'MISMATCH'}")
+            return 0 if ok else 1
+    return 0
+
+
 def cmd_features(args):
     profile = make_profile(args.device, latched=args.latched)
     with open_bus(args) as bus:
@@ -1364,21 +1712,28 @@ def cmd_features(args):
             address = table[0]["dynamic_address"]
             settle_after_enumeration(bus, address, profile)
             try:
-                restored = profile.soft_reset(bus, address)
+                restored = profile.clear_latched_modes(bus, address)
             except MemsError as exc:
-                print(f"  could not soft reset the part afterwards: {exc}")
+                print(f"  could not clear latched modes afterwards: {exc}")
         if restored:
-            print("  the part was soft reset afterwards, to undo the modes "
+            print("  the part was reset afterwards, to undo the modes "
                   "this battery latched\n")
+        else:
+            print("  WARNING: this profile cannot undo the modes the battery "
+                  "latched, so the next run would start from a different part "
+                  "state than this one did\n")
         counts = Counter(verdict for _, verdict, _ in rows)
         print(f"\n  {counts[SUPPORTED]} supported, "
               f"{counts[NOT_IMPLEMENTED]} not implemented, "
               f"{counts[UNDETERMINED]} undetermined")
         print("  a verdict of undetermined means the command completed and "
               "nothing measurable changed.")
-        print("  it is not a no: on this bus a target accepts and discards "
-              "commands it does not implement,")
-        print("  so a result code alone is never evidence of support.")
+        print("  it is not a no: some targets accept and discard commands "
+              "they do not implement")
+        print("  and some refuse them, and which one a target does is a "
+              "property of that target.")
+        print("  So a success alone is never evidence of support, because a "
+              "refusal is not guaranteed to arrive.")
 
         bus.init_bus()
     return 0
@@ -1546,6 +1901,14 @@ def build_parser():
 
     sub = add("reset", cmd_reset, "soft reset the part and re-enumerate")
     add_device(sub)
+
+    sub = add("power-cycle", cmd_power_cycle,
+              "drop the bus rail and bring it back, then re-enumerate")
+    sub.add_argument("--device", choices=sorted(PROFILES),
+                     help="check this profile's identity afterwards, optional")
+    sub.add_argument("--latched", action="store_true", help=argparse.SUPPRESS)
+    sub.add_argument("--settle", type=float, default=1.5,
+                     help="seconds to hold the rail down (default 1.5)")
 
     return parser
 

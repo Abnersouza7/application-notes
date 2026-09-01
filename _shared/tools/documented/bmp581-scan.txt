@@ -2,7 +2,8 @@
 1 target(s) on the bus at 3300 mV, PUSH_PULL_5_MHZ_50_DC, OPEN_DRAIN_1_MHZ
 
   dynamic address <addr>
-    PID  07 70 10 50 00 00   device id 0x1050
+    PID  07 70 10 50 10 00   device id 0x1050
+         enumeration cached 07 70 10 50 00 00, which is the pre-settling value
     BCR  0x06   DCR 0x62
     HDR  SDR only   IBI capable
     profile  bmp581
