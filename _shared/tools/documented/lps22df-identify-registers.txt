@@ -1,0 +1,41 @@
+# mask-fingerprint: 712e82a12f7b
+lps22df  (STMicroelectronics, barometric pressure sensor)
+  dynamic address <addr>
+
+  PID 02 08 00 B4 10 0B
+    MIPI member id (47:33)       0x0104
+    id type selector (32)        0
+    device id (31:16)            0x00B4
+    instance id (15:12)          0b0001
+    reserved (11:0)              0x00B
+
+  BCR 0x07
+    device role                      I3C target
+    advanced capabilities (bit 5)    no, so SDR only
+    virtual target support           no
+    offline capable                  yes
+    IBI mandatory payload            yes
+    IBI capable                      yes
+    max data speed limit             yes
+
+  DCR 0x62   pressure sensor, per the MIPI DCR registry
+
+  CHIP_ID register 0x0F reads 0xB4, raw <bytes>
+    chip id field 0xB4, expected 0xB4: match
+
+  register access: 1-byte data, 0 dummy byte(s) before a read payload
+  observable: breathe on it or lift it and the pressure changes; about 12 Pa per meter of altitude
+
+  registers
+    <reg-addr> INTERRUPT_CFG    <reg-value>
+    <reg-addr> IF_CTRL          <reg-value>
+    <reg-addr> WHO_AM_I         <reg-value>
+    <reg-addr> CTRL_REG1        <reg-value>
+    <reg-addr> CTRL_REG2        <reg-value>
+    <reg-addr> CTRL_REG3        <reg-value>
+    <reg-addr> CTRL_REG4        <reg-value>
+    <reg-addr> I3C_IF_CTRL_ADD  <reg-value>
+    <reg-addr> INT_SOURCE       <reg-value>
+    <reg-addr> STATUS           <reg-value>
+    <reg-addr> PRESS_OUT_XL     <reg-value>
+    <reg-addr> TEMP_OUT_L       <reg-value>

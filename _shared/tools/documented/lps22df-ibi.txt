@@ -1,0 +1,8 @@
+# mask-fingerprint: 712e82a12f7b
+lps22df at <addr>: interrupt routed to the I3C IBI, data-ready pulsed through CTRL_REG4.DRDY_PLS
+  IBI from <addr>  MDB 02  extra 00 00 33 00  mandatory data byte=0x02
+  IBI from <addr>  MDB 02  extra 00 00 33 00  mandatory data byte=0x02
+
+  <n> interrupts in <seconds> = <rate>
+  configured output data rate 10 Hz (<error>)
+  the rate is comparable with the configured rate; individual arrival times are not, because USB coalesces them

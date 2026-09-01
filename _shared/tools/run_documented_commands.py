@@ -193,7 +193,8 @@ def device_commands(device):
             ["ibi", "--device", device, "--seconds", "3", "--show", "2",
              "--latched"],
             [("the latched mode is named",
-              r"latched, re-armed by the host reading INT_STATUS"),
+              profile.get("latched_mode_text",
+                          r"latched, re-armed by the host reading INT_STATUS")),
              ("interrupts still arrive in latched mode",
               r"MDB %02X" % profile["mdb"]),
              ("the rate is still close to the configured rate",
@@ -203,6 +204,38 @@ def device_commands(device):
 
 
 DEVICE_FACTS = {
+    "lps22df": {
+        "chip_id_register": 0x0F,
+        "chip_id_name": "WHO_AM_I",
+        "chip_id": 0xB4,
+        "device_id": "00B4",
+        "dcr": 0x62,                             # same class as the Bosch BMP58x
+        "data_width": 1,
+        "read_dummy": 0,
+        "mdb": 0x02,
+        "ibi_rate_hz": 10,
+        "has_latched_mode": True,
+        "latched_mode_text": r"data-ready as a level, cleared by reading the sample",
+        "stream_invariants": [
+            ("pressure is decoded in hPa and plausible for a room",
+             r"pressure\s+(9[5-9]\d|10[0-5]\d)\.\d+ hPa"),
+            ("temperature is decoded", r"temperature\s+\d+\.\d+ C"),
+        ],
+        "feature_invariants": [
+            ("the DCR identifies a pressure sensor", r"GETDCR\s+supported\s+0x62"),
+            # This part's datasheet publishes the bytes each getter returns, so
+            # the identity is checkable against the document rather than only
+            # against a previous run.
+            ("the PID matches the published value",
+             r"GETPID\s+supported\s+02 08 00 B4 10 0B"),
+            ("the interrupt payload carries the status register",
+             r"IBI mandatory data byte\s+supported\s+0x02.*"
+             r"(T_OR|P_DA)=[01]"),
+            ("the interrupt rate matches the configured rate",
+             rate_within(10, FEATURES_IBI_WINDOW_S)),
+        ],
+    },
+
     "lsm6dsv": {
         "chip_id_register": 0x0F,
         "chip_id_name": "WHO_AM_I",
