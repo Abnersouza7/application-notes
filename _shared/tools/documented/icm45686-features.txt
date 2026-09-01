@@ -29,7 +29,7 @@ icm45686 at <addr>, adapter rates PUSH_PULL_5_MHZ_50_DC / OPEN_DRAIN_1_MHZ at 33
   SETXTIME / GETXTIME         supported         <before> then <after> after SETXTIME <subcommand>; timing control disabled again afterwards
   SETNEWDA                    supported         moved 0x08 to <addr> and the old address stopped answering
   RSTDAA                      supported         accepted, and the address was released on some attempts but not all, so a host should confirm rather than assume
-  WARNING: this profile cannot undo the modes the battery latched, so the next run would start from a different part state than this one did
+  the part was reset afterwards, to undo the modes this battery latched
   <counts>
   a verdict of undetermined means the command completed and nothing measurable changed.
   it is not a no: some targets accept and discard commands they do not implement
