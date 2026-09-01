@@ -389,8 +389,20 @@ class Bus:
         Worth having for its own sake: a target left in a state no bus command
         can reach is otherwise a trip to the bench, and this makes exploring an
         undocumented register map recoverable.
+
+        Not every accessory can do this. The mikroBUS Adapter Board answers
+        I3C_PORTS_NOT_POWERED, because the adapter is not the thing sourcing
+        the rail there, and a recovery path that raises is worse than one that
+        says it cannot help. Falls back to resetting the adapter, which
+        recovers an I3C peripheral that has stopped answering while system
+        commands still work.
         """
-        self.call(self.device.useExternalI3cVoltage)
+        ok, response = self.try_call(self.device.useExternalI3cVoltage)
+        code = response.get("result") if isinstance(response, dict) else str(response)
+        if not ok and "NOT_POWERED" in str(code):
+            self.try_call(self.device.resetDevice)
+            time.sleep(3.0)
+            return False
         time.sleep(settle)
         self.call(self.device.setI3cVoltage, voltage_mv)
         time.sleep(0.5)
@@ -1214,12 +1226,135 @@ class Lsm6dsv(Profile):
         return True
 
 
+class Icm45686(Profile):
+    """ICM-45686, on a 6DOF IMU 27 Click in the mikroBUS Adapter Board.
+
+    The first part in this series whose BCR bit 5 is set, so the first that
+    can demonstrate a high data rate transfer rather than report its absence.
+    Everything here was established on the bench and then confirmed against
+    the datasheet, in that order.
+
+    Two things are worth knowing before reading a register.
+
+    FIFO_DATA sits at 0x14 and does not auto-increment, which is correct for a
+    FIFO and confusing if it is the register a bring-up happens to probe
+    first: a four byte read returns the same byte four times and looks like an
+    interface that cannot walk the register file. Everywhere else the address
+    does advance.
+
+    The data registers are little endian, which is worth stating because the
+    axes still decode to something plausible if the halves are swapped. The
+    check that settles it costs nothing: at rest the magnitude is 1 g, and it
+    is only 1 g for one combination of byte order and full scale.
+    """
+    name = "icm45686"
+    vendor = "TDK InvenSense"
+    kind = "6-axis IMU"
+
+    data_width = 1
+    read_dummy = 0
+
+    chip_id_register = 0x72                  # WHO_AM_I
+    chip_id_expected = 0xE9
+    bcr_expected = 0x27                      # bit 5 set: HDR claimed
+    dcr_expected = 0x44                      # 6-axis IMU
+
+    ACCEL_DATA_X = 0x00                      # through 0x05, then gyro to 0x0B
+    GYRO_DATA_X = 0x06
+    PWR_MGMT0 = 0x10
+    FIFO_DATA = 0x14
+    INT1_CONFIG0 = 0x16
+    INT1_STATUS0 = 0x19                      # read to clear
+    ACCEL_CONFIG0 = 0x1B
+    GYRO_CONFIG0 = 0x1C
+    WHO_AM_I = 0x72
+
+    ACCEL_LOW_NOISE = 0x03                   # PWR_MGMT0 bits 1:0
+    GYRO_LOW_NOISE = 0x0C                    # bits 3:2
+    ODR_50HZ = 0x0A                          # ACCEL_CONFIG0 bits 3:0
+    FS_32G = 0x00                            # bits 6:4, the reset value
+    ODR_HZ = 50.0
+    LSB_PER_G = 1024.0                       # +/- 32 g full scale
+    INT_DRDY = 1 << 2                        # INT1_CONFIG0 and INT1_STATUS0
+
+    # ACCEL_CONFIG0's oversampling and rate field, restored by the probe.
+    scratch_register = 0x1B
+
+    observable = ("tilt the board and the accelerometer axes change sign; "
+                  "at rest the magnitude is about 1 g")
+
+    registers = ((0x00, "ACCEL_DATA_X1"), (0x06, "GYRO_DATA_X1"),
+                 (0x10, "PWR_MGMT0"), (0x14, "FIFO_DATA"),
+                 (0x16, "INT1_CONFIG0"), (0x19, "INT1_STATUS0"),
+                 (0x1B, "ACCEL_CONFIG0"), (0x1C, "GYRO_CONFIG0"),
+                 (0x72, "WHO_AM_I"))
+
+    def start_stream(self, bus, address, route_ibi=False):
+        bus.write_reg(address, self.ACCEL_CONFIG0,
+                      self.FS_32G | self.ODR_50HZ, self)
+        # Accelerometer only. The gyroscope has its own rate field and its
+        # reset value is 800 Hz, so enabling both puts data-ready on the bus
+        # at the faster of the two and swamps it: measured as a BUS_TIMEOUT
+        # part way through a three second window.
+        bus.write_reg(address, self.PWR_MGMT0, self.ACCEL_LOW_NOISE, self)
+        time.sleep(0.3)
+        bus.read_regs(address, self.ACCEL_DATA_X, 6, self)
+        if route_ibi:
+            bus.enable_ibis(address)
+            bus.write_reg(address, self.INT1_CONFIG0, self.INT_DRDY, self)
+            bus.read_reg(address, self.INT1_STATUS0, self)      # start cleared
+        return True
+
+    def stop_stream(self, bus, address):
+        bus.write_reg(address, self.INT1_CONFIG0, 0x00, self)
+        bus.write_reg(address, self.PWR_MGMT0, 0x00, self)
+        return True
+
+    def read_sample(self, bus, address):
+        raw, _ = bus.read_regs(address, self.ACCEL_DATA_X, 6, self)
+        axes = []
+        for i in range(0, 6, 2):
+            value = raw[i] | (raw[i + 1] << 8)          # little endian
+            axes.append(value - 0x10000 if value & 0x8000 else value)
+        magnitude = sum(a * a for a in axes) ** 0.5 / self.LSB_PER_G
+        return [("x", axes[0] / self.LSB_PER_G, "g"),
+                ("y", axes[1] / self.LSB_PER_G, "g"),
+                ("z", axes[2] / self.LSB_PER_G, "g"),
+                ("magnitude", magnitude, "g")]
+
+    def route_interrupt_to_ibi(self, bus, address):
+        bus.enable_ibis(address)
+        bus.write_reg(address, self.INT1_CONFIG0, self.INT_DRDY, self)
+        return True
+
+    def clear_interrupt(self, bus, address):
+        # INT1_STATUS0 is read to clear. Without this the data-ready condition
+        # stays asserted and the stream stops after one interrupt.
+        bus.read_reg(address, self.INT1_STATUS0, self)
+        return None
+
+    def interrupt_mode(self):
+        return "data-ready through INT1_CONFIG0, cleared by reading INT1_STATUS0"
+
+    def expected_ibi_rate(self):
+        return self.ODR_HZ
+
+    def decode_mdb(self, byte):
+        # The mandatory data byte is not this part's INT1_STATUS0 register.
+        # With only data-ready enabled it reads 0x01 on every interrupt, so
+        # what it encodes beyond "an interrupt happened" is not established
+        # here and is not guessed at. MIPI reserves bit 7 for a pending read.
+        return {"pending read (bit 7)": bool(byte & 0x80),
+                "device-specific (bits 6:0)": f"0x{byte & 0x7F:02X}"}
+
+
 PROFILES = {
     "bmi323": Bmi323,
     "bmp581": Bmp581,
     "bmp585": Bmp585,
     "lps22df": Lps22df,
     "lsm6dsv": Lsm6dsv,
+    "icm45686": Icm45686,
 }
 
 
