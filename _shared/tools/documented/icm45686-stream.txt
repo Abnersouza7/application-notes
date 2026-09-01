@@ -1,0 +1,5 @@
+# mask-fingerprint: b918a1960c13
+icm45686 at <addr>, 2 s
+  tilt the board and the accelerometer axes change sign; at rest the magnitude is about 1 g
+
+ x <value> g y <value> g z <value> g magnitude <value> g

@@ -93,17 +93,27 @@ COMMON_FEATURE_INVARIANTS = [
      r"control: refusal reporting\s+supported"),
     ("MWL is measured, not assumed",
      r"SETMWL / GETMWL\s+(not implemented|supported)"),
+    # A target either declares SDR only, in which case the BCR settles it, or
+    # claims HDR, in which case the claim is checked against an SDR read of the
+    # same register. Both are a real answer; not asking is not.
     ("HDR is settled from the BCR",
-     r"HDR modes\s+not implemented\s+BCR bit 5 clear"),
-    ("the HDR attempt is called out as not diagnostic",
-     r"HDR-DDR read attempt\s+undetermined.*not diagnostic"),
+     r"HDR modes\s+(not implemented\s+BCR bit 5 clear"
+     r"|undetermined\s+BCR bit 5 set)"),
+    ("the HDR attempt reaches a verdict",
+     r"(HDR-DDR read attempt\s+undetermined.*not diagnostic"
+     r"|HDR-DDR against SDR\s+(supported|not implemented))"),
     ("group addressing is measured",
      r"SETGRPA / RSTGRPA\s+(not implemented|supported)"),
     ("SETNEWDA is proven with a negative control",
      r"SETNEWDA\s+supported\s+moved 0x[0-9A-F]{2} to 0x[0-9A-F]{2} and the old "
      r"address stopped answering"),
-    ("RSTDAA is proven",
-     r"RSTDAA\s+supported"),
+    # Most targets release their dynamic address on RSTDAA and the probe can
+    # prove it by finding the old address silent. The ICM-45686 answers
+    # SUCCESS and keeps answering at its address, which is a real difference
+    # rather than a probe failure, so the invariant requires a verdict with
+    # its evidence rather than requiring one particular verdict.
+    ("RSTDAA reaches a verdict",
+     r"RSTDAA\s+(supported|undetermined)\s+\S.*address"),
     ("interrupts are delivered and counted",
      r"ENEC and IBI delivery\s+supported"),
     ("DISEC stops the stream",
@@ -129,14 +139,14 @@ def device_commands(device):
             ("the PID device id is reported",
              r"device id 0x" + profile["device_id"]),
             ("the profile is recognized", r"profile\s+" + device),
-            ("HDR is reported as SDR only", r"HDR\s+SDR only"),
+            ("the HDR capability is reported", r"HDR\s+(SDR only|claimed)"),
         ], False),
 
         ("identify", ["identify", "--device", device], [
             ("the chip id matches",
              r"chip id field 0x%02X, expected 0x%02X: match" % (chip_id, chip_id)),
-            ("the BCR decodes to SDR only",
-             r"advanced capabilities \(bit 5\)\s+no, so SDR only"),
+            ("the BCR advanced-capability bit is decoded",
+             r"advanced capabilities \(bit 5\)\s+(no, so SDR only|yes)"),
             ("the DCR is reported", r"DCR 0x%02X" % profile["dcr"]),
             ("the framing is stated",
              r"register access: %d-byte data, %d dummy byte" %
@@ -204,6 +214,40 @@ def device_commands(device):
 
 
 DEVICE_FACTS = {
+    "icm45686": {
+        "chip_id_register": 0x72,
+        "chip_id_name": "WHO_AM_I",
+        "chip_id": 0xE9,
+        "device_id": "0000",                     # this part leaves the PID field zero
+        "dcr": 0x44,
+        "data_width": 1,
+        "read_dummy": 0,
+        "mdb": 0x01,
+        "ibi_rate_hz": 50,
+        "has_latched_mode": False,
+        "stream_invariants": [
+            ("acceleration is decoded in g", r"x\s+-?\d+\.\d+ g"),
+            ("all three axes are reported",
+             r"x\s+-?\d+\.\d+ g\s+y\s+-?\d+\.\d+ g\s+z\s+-?\d+\.\d+ g"),
+            ("the magnitude is about 1 g at rest",
+             r"magnitude\s+(0\.9[5-9]\d|1\.0[0-4]\d) g"),
+        ],
+        "feature_invariants": [
+            ("the DCR identifies a 6-axis IMU", r"GETDCR\s+supported\s+0x44"),
+            # The reason this device is in the series. Every other part reports
+            # BCR bit 5 clear and can only be asked whether it claims HDR; this
+            # one claims it and the claim is checked against SDR.
+            ("HDR is claimed in the BCR",
+             r"HDR modes\s+undetermined\s+BCR bit 5 set"),
+            ("an HDR-DDR read returns what SDR returns",
+             r"HDR-DDR against SDR\s+supported\s+.*the same bytes by both routes"),
+            ("the bus returns to SDR afterwards",
+             r"bus after HDR-DDR\s+supported"),
+            ("the interrupt rate matches the configured rate",
+             rate_within(50, FEATURES_IBI_WINDOW_S)),
+        ],
+    },
+
     "lps22df": {
         "chip_id_register": 0x0F,
         "chip_id_name": "WHO_AM_I",
