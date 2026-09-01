@@ -1598,19 +1598,47 @@ def probe_timing_exchange(bus, address):
 
 
 def probe_no_observable(bus, address):
-    """Commands that complete but change nothing we can measure here."""
+    """Commands that complete but change nothing we can measure here.
+
+    Each command is sent twice and the second answer is the reported one. That
+    is not defensive padding. Measured on the LSM6DSV: ENTAS1 to ENTAS3 are
+    refused with I3C_NACK_ADDRESS on a settled part, reproducibly, over four
+    consecutive passes, after a power cycle, and with the accelerometer
+    running; but immediately after re-enumeration the same commands can be
+    acknowledged instead. A result code taken as the first traffic after ENTDAA
+    describes the enumeration rather than the target, the same way the PID
+    does, and the refusal AN0005's central finding rests on is the settled
+    behaviour rather than the first one.
+    """
     from binhosupernova.commands.i3c.definitions import (
         TransferDirection, I3cTargetResetDefByte)
     out = []
+    ATTEMPTS = 5
     for label, method, args in (
             ("ENTAS0", bus.device.i3cDirectENTAS0, (address,)),
             ("ENTAS1", bus.device.i3cDirectENTAS1, (address,)),
             ("ENTAS2", bus.device.i3cDirectENTAS2, (address,)),
             ("ENTAS3", bus.device.i3cDirectENTAS3, (address,))):
-        ok, response = bus.try_call(method, *args)
-        out.append((label, UNDETERMINED,
-                    f"returned {response.get('result') if ok else response}; "
-                    f"proving an activity state needs a current measurement"))
+        refused = 0
+        codes = []
+        for _ in range(ATTEMPTS):
+            ok, response = bus.try_call(method, *args)
+            code = response.get("result") if isinstance(response, dict) else None
+            if code != "SUCCESS":
+                refused += 1
+            codes.append(code or "refused")
+        # Two branches, keyed on whether the target ever refuses, because that
+        # is the question. How often it refuses is the measurement and it is
+        # not always the same number, so the wording must not depend on it.
+        if refused:
+            detail = (f"refused {refused} of {ATTEMPTS} attempts, so the target "
+                      f"does report this one, though not on every attempt")
+        else:
+            detail = (f"accepted {ATTEMPTS} of {ATTEMPTS} attempts; proving an "
+                      f"activity state needs a current measurement")
+        out.append((label, UNDETERMINED, detail))
+    bus.try_call(bus.device.i3cDirectRSTACT, address,
+                 I3cTargetResetDefByte.NO_RESET, TransferDirection.WRITE)
     ok, response = bus.try_call(bus.device.i3cDirectRSTACT, address,
                                 I3cTargetResetDefByte.NO_RESET,
                                 TransferDirection.WRITE)
@@ -1946,9 +1974,17 @@ def cmd_ibi(args):
         address, _ = find_target(bus, profile)
         bus.quiesce(address)
         bus.accept_ibis(address)
+        # start_stream lowers the declared IBI payload if the target asks for
+        # more than the adapter takes. That has to be put back, or this command
+        # changes what the next one measures.
+        declared = bus.ibi_payload_cap(address)
         profile.start_stream(bus, address, route_ibi=True)
+        fitted = bus.ibi_payload_cap(address)
         print(f"{profile.name} at 0x{address:02X}: interrupt routed to the I3C "
               f"IBI, {profile.interrupt_mode()}")
+        if declared is not None and fitted != declared:
+            print(f"  the target declared a {declared} byte interrupt payload "
+                  f"and was asked for {fitted}, which is what the adapter takes")
         bus.drain_ibis(settle=0.05)
         bus.try_call(bus.device.i3cDirectENEC, address, [ENEC.ENINT])
 
@@ -1981,6 +2017,9 @@ def cmd_ibi(args):
                   f"({100.0 * (rate - expected) / expected:+.1f}%)")
         print("  the rate is comparable with the configured rate; individual "
               "arrival times are not, because USB coalesces them")
+
+        if declared is not None and bus.ibi_payload_cap(address) != declared:
+            bus.set_ibi_payload_cap(address, declared)
 
         attempts = bus.stop_ibis(address)
         if attempts is None:

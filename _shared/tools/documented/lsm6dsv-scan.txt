@@ -1,0 +1,8 @@
+# mask-fingerprint: 712e82a12f7b
+1 target(s) on the bus at 3300 mV, PUSH_PULL_5_MHZ_50_DC, OPEN_DRAIN_1_MHZ
+
+  dynamic address <addr>
+    PID  02 08 00 70 12 0B   device id 0x0070
+    BCR  0x07   DCR 0x44
+    HDR  SDR only   IBI capable
+    profile  lsm6dsv

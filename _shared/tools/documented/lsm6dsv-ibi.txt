@@ -1,0 +1,9 @@
+# mask-fingerprint: 712e82a12f7b
+lsm6dsv at <addr>: interrupt routed to the I3C IBI, data-ready through INT1_CTRL, cleared by reading the sample
+  the target declared a 10 byte interrupt payload and was asked for 8, which is what the adapter takes
+  IBI from <addr>  MDB 02  extra 00 00 00 05 04 00 00  data ready=True, wake-up or basic interrupt function=False, raw=0x02
+  IBI from <addr>  MDB 02  extra 00 00 00 05 04 00 00  data ready=True, wake-up or basic interrupt function=False, raw=0x02
+
+  <n> interrupts in <seconds> = <rate>
+  configured output data rate 60 Hz (<error>)
+  the rate is comparable with the configured rate; individual arrival times are not, because USB coalesces them

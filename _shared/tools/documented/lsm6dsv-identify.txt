@@ -1,0 +1,27 @@
+# mask-fingerprint: 712e82a12f7b
+lsm6dsv  (STMicroelectronics, 6-axis IMU)
+  dynamic address <addr>
+
+  PID 02 08 00 70 12 0B
+    MIPI member id (47:33)       0x0104
+    id type selector (32)        0
+    device id (31:16)            0x0070
+    instance id (15:12)          0b0001
+    reserved (11:0)              0x20B
+
+  BCR 0x07
+    device role                      I3C target
+    advanced capabilities (bit 5)    no, so SDR only
+    virtual target support           no
+    offline capable                  yes
+    IBI mandatory payload            yes
+    IBI capable                      yes
+    max data speed limit             yes
+
+  DCR 0x44
+
+  CHIP_ID register 0x0F reads 0x70, raw <bytes>
+    chip id field 0x70, expected 0x70: match
+
+  register access: 1-byte data, 0 dummy byte(s) before a read payload
+  observable: tilt the board and the accelerometer axes change sign; at rest the magnitude is about 1 g

@@ -146,8 +146,11 @@ def device_commands(device):
         ("identify-registers",
          ["identify", "--device", device, "--registers"], [
              ("the register dump appears", r"\n  registers\n"),
-             ("the chip id register is listed",
-              r"0x%02X CHIP_ID" % chip_register),
+             # Not every part calls it CHIP_ID: the ST parts name it
+             # WHO_AM_I, and the register dump uses the part's own name.
+             ("the identity register is listed",
+              r"0x%02X %s" % (chip_register,
+                              profile.get("chip_id_name", "CHIP_ID"))),
          ], False),
 
         ("read-chip-id",
@@ -200,6 +203,40 @@ def device_commands(device):
 
 
 DEVICE_FACTS = {
+    "lsm6dsv": {
+        "chip_id_register": 0x0F,
+        "chip_id_name": "WHO_AM_I",
+        "chip_id": 0x70,
+        "device_id": "0070",
+        "dcr": 0x44,
+        "data_width": 1,
+        "read_dummy": 0,
+        "mdb": 0x02,                             # data-ready
+        "ibi_rate_hz": 60,
+        "has_latched_mode": False,
+        "stream_invariants": [
+            ("acceleration is decoded in g", r"x\s+-?\d+\.\d+ g"),
+            ("all three axes are reported",
+             r"x\s+-?\d+\.\d+ g\s+y\s+-?\d+\.\d+ g\s+z\s+-?\d+\.\d+ g"),
+            ("the magnitude is about 1 g at rest",
+             r"magnitude\s+(0\.9[5-9]\d|1\.0[0-4]\d) g"),
+        ],
+        "feature_invariants": [
+            ("the DCR identifies a 6-axis IMU", r"GETDCR\s+supported\s+0x44"),
+            # This part declares a maximum IBI payload larger than the adapter
+            # accepts, and without the negotiation every interrupt is silently
+            # discarded. It is the most useful row the battery prints here, so
+            # require it rather than hoping it stays.
+            ("the IBI payload is checked against the adapter's limit",
+             r"IBI payload negotiation\s+supported\s+the target declared \d+ "
+             r"byte\(s\), (the adapter takes \d+|within the \d+ the adapter takes)"),
+            ("MRL restores the maximum IBI payload it found",
+             r"SETMRL / GETMRL\s+supported\s+.*maximum IBI payload \d+ throughout"),
+            ("the interrupt rate matches the configured rate",
+             rate_within(60, FEATURES_IBI_WINDOW_S)),
+        ],
+    },
+
     "bmi323": {
         "chip_id_register": 0x00,
         "chip_id": 0x43,
@@ -216,13 +253,13 @@ DEVICE_FACTS = {
              r"\|acc\|\s+(0\.9[5-9]\d|1\.0[0-4]\d) g"),
         ],
         "feature_invariants": [
-            # Whether this can be proven depends on session history: the
-            # sub-commands latch, so once the part is in the state they
-            # select nothing moves until a power cycle. Accept either
-            # verdict, but require the reason to be stated either way.
-            ("SETXTIME is either proven or explained",
-             r"SETXTIME / GETXTIME\s+(supported\s+.* after SETXTIME"
-             r"|undetermined\s+.*already be in the state they select)"),
+            # The probe disables timing control before it starts, so this no
+            # longer depends on what an earlier run left behind, and it has to
+            # put it back afterwards: the mode it engages adds a timestamp to
+            # every interrupt and can stop a later run's interrupts arriving.
+            ("SETXTIME is proven and the mode is not left engaged",
+             r"SETXTIME / GETXTIME\s+supported\s+.* after SETXTIME "
+             r"0x[0-9A-F]{2}; timing control disabled again afterwards"),
             ("the interrupt rate matches the configured rate",
              rate_within(50, FEATURES_IBI_WINDOW_S)),
         ],
@@ -287,7 +324,17 @@ MASKS = (
     (re.compile(r"\([-+]\d+\.\d%\)"), "(<error>)"),
     # counted things
     (re.compile(r"\b\d+ (interrupts|IBIs|in)\b"), r"<n> \1"),
-    (re.compile(r"\{\(\d+,\): \d+\}"), "{(<mdb>,): <n>}"),
+    # How many of several attempts a command was refused on. The count is the
+    # measurement, and on the LSM6DSV's activity-state commands it is not
+    # always the same count, which is the point of reporting it that way.
+    (re.compile(r"(refused|accepted) \d+ of \d+ attempts"),
+     r"\1 <n> of <m> attempts"),
+    # Payload dictionaries: the key is the payload tuple and the value is how
+    # many of them arrived, which varies from run to run. The old pattern only
+    # matched a one-byte payload, so a part with a longer payload leaked a raw
+    # interrupt count straight into the golden.
+    (re.compile(r"\{\((?:\d+, )*\d+\): \d+(?:, \((?:\d+, )*\d+\): \d+)*\}"),
+     "{<payloads>: <n>}"),
     (re.compile(r"^\s*\d+ supported, \d+ not implemented, \d+ undetermined",
                 re.M), "  <counts>"),
     # measured physical values
