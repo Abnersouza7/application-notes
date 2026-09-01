@@ -25,7 +25,7 @@ bmp581 at <addr>, adapter rates PUSH_PULL_5_MHZ_50_DC / OPEN_DRAIN_1_MHZ at 3300
   IBI payloads seen           supported         {(<mdb>,): <n>}
   DISEC stops them            supported         the stream stopped after <n> DISEC attempts
   hot-join                    not implemented   no hot-join notification at any point
-  SETXTIME / GETXTIME         supported         <before> then <after> after SETXTIME <subcommand>
+  SETXTIME / GETXTIME         supported         <before> then <after> after SETXTIME <subcommand>; timing control disabled again afterwards
   SETNEWDA                    supported         moved 0x08 to <addr> and the old address stopped answering
   RSTDAA                      supported         the table dropped to [<addrs>] and 0x0A stopped answering
   the part was reset afterwards, to undo the modes this battery latched

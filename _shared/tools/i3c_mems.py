@@ -1479,6 +1479,27 @@ def probe_hdr(bus, address, profile, bcr):
     return out
 
 
+# SETXTIME 0xFF disables timing control. Measured on the BMP581: from a clean
+# 02 00 06 32, sub-command 0xDF sets byte 1 to 0x02 and 0xFF puts it back,
+# where 0x00 does nothing. That matters more than it looks, because the mode
+# it engages adds a timestamp to every in-band interrupt, and on a target
+# already near the adapter's eight byte interrupt limit that silently stops
+# interrupts being delivered at all.
+SETXTIME_DISABLE = 0xFF
+
+
+def timing_control_state(bus, address):
+    ok, response = bus.try_call(bus.device.i3cGETXTIME, address)
+    return payload_of(response) if ok else None
+
+
+def clear_timing_control(bus, address):
+    """Turn timing control off and report whether it went."""
+    bus.try_call(bus.device.i3cDirectSETXTIME, address, SETXTIME_DISABLE, [])
+    time.sleep(0.05)
+    return timing_control_state(bus, address)
+
+
 def probe_timing_exchange(bus, address):
     """SETXTIME changes a byte that GETXTIME reports, when it is implemented.
 
@@ -1486,32 +1507,46 @@ def probe_timing_exchange(bus, address):
     part is already in is correctly a no-op. Measured on the BMI323: from a
     GETXTIME of 03 00 0D 78, sub-command 0x3F moves byte 1 to 0x01 and then
     never moves it again, while 0xDF moves it to 0x03. So a probe that sends
-    one sub-command can only prove support once per power cycle. Try several,
-    and if none of them move the value say why rather than calling it no
-    observable effect.
+    one sub-command can only prove support once per power cycle.
+
+    That made the probe report a different answer on a second run than on a
+    first, which is a probe reporting its own history rather than the part.
+    It now disables timing control before it starts, so it always measures
+    from the same place, and puts the part back afterwards. Restoring matters
+    beyond tidiness here: the mode adds a timestamp to every in-band
+    interrupt, so a battery that leaves it engaged can stop a later run's
+    interrupts arriving at all.
     """
     SUBCOMMANDS = (0x3F, 0xDF, 0x1F, 0x5F, 0x7F)
-    ok_before, before = bus.try_call(bus.device.i3cGETXTIME, address)
-    if not ok_before:
+    entry = timing_control_state(bus, address)
+    if entry is None:
         return [("SETXTIME / GETXTIME", UNDETERMINED, "GETXTIME did not answer")]
-    baseline = payload_of(before)
+
+    baseline = clear_timing_control(bus, address) or entry
     current = baseline
+    verdict = None
     for subcommand in SUBCOMMANDS:
         bus.try_call(bus.device.i3cDirectSETXTIME, address, subcommand, [])
-        ok_after, after = bus.try_call(bus.device.i3cGETXTIME, address)
-        if not ok_after:
-            continue
-        value = payload_of(after)
+        value = timing_control_state(bus, address)
         if value and value != current:
-            return [("SETXTIME / GETXTIME", SUPPORTED,
-                     f"{hex_bytes(current)} then {hex_bytes(value)} after "
-                     f"SETXTIME 0x{subcommand:02X}")]
+            verdict = ("SETXTIME / GETXTIME", SUPPORTED,
+                       f"{hex_bytes(current)} then {hex_bytes(value)} after "
+                       f"SETXTIME 0x{subcommand:02X}")
+            break
         current = value or current
-    return [("SETXTIME / GETXTIME", UNDETERMINED,
-             f"{hex_bytes(baseline)} unmoved by sub-commands "
-             f"{', '.join(f'0x{s:02X}' for s in SUBCOMMANDS)}; the part may "
-             f"already be in the state they select, which a power cycle would "
-             f"reset")]
+
+    restored = clear_timing_control(bus, address)
+    put_back = restored == baseline
+    if verdict is None:
+        return [("SETXTIME / GETXTIME", UNDETERMINED,
+                 f"{hex_bytes(baseline)} unmoved by sub-commands "
+                 f"{', '.join(f'0x{s:02X}' for s in SUBCOMMANDS)}, from a "
+                 f"cleared start, so the part does not appear to implement it")]
+    detail = verdict[2] + ("; timing control disabled again afterwards"
+                           if put_back else
+                           f"; timing control could NOT be turned off again, "
+                           f"left at {hex_bytes(restored)}")
+    return [(verdict[0], verdict[1], detail)]
 
 
 def probe_no_observable(bus, address):
