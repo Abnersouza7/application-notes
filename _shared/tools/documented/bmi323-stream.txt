@@ -1,9 +1,5 @@
-# mask-fingerprint: 41f66580892b
+# mask-fingerprint: b918a1960c13
 bmi323 at <addr>, 2 s
   tilt the board and the accelerometer axes change sign; at rest the magnitude is about 1 g
 
-  acc x     <value> g   acc y    <value> g   acc z     <value> g   |acc|     <value> g
-  acc x     <value> g   acc y    <value> g   acc z     <value> g   |acc|     <value> g
-  acc x     <value> g   acc y    <value> g   acc z     <value> g   |acc|     <value> g
-  acc x     <value> g   acc y    <value> g   acc z     <value> g   |acc|     <value> g
-  acc x     <value> g   acc y    <value> g   acc z     <value> g   |acc|     <value> g
+ acc x <value> g acc y <value> g acc z <value> g |acc| <value> g

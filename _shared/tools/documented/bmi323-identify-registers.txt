@@ -1,4 +1,4 @@
-# mask-fingerprint: 41f66580892b
+# mask-fingerprint: b918a1960c13
 bmi323  (Bosch Sensortec, 6-axis IMU)
   dynamic address <addr>
 

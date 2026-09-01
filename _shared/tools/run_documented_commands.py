@@ -366,7 +366,11 @@ MASKS = (
     # many of them arrived, which varies from run to run. The old pattern only
     # matched a one-byte payload, so a part with a longer payload leaked a raw
     # interrupt count straight into the golden.
-    (re.compile(r"\{\((?:\d+, )*\d+\): \d+(?:, \((?:\d+, )*\d+\): \d+)*\}"),
+    # A one-element tuple prints as "(2,)" and a longer one as "(2, 0, 0)", so
+    # the element list has to tolerate a trailing comma. Getting that wrong
+    # leaves a raw interrupt count in the golden, which then never matches
+    # twice: the BMI323 wrote 100 and read back 150.
+    (re.compile(r"\{\((?:\d+,?\s*)+\): \d+(?:, \((?:\d+,?\s*)+\): \d+)*\}"),
      "{<payloads>: <n>}"),
     (re.compile(r"^\s*\d+ supported, \d+ not implemented, \d+ undetermined",
                 re.M), "  <counts>"),
@@ -428,8 +432,24 @@ FINGERPRINT_PREFIX = "# mask-fingerprint: "
 def mask(text):
     for pattern, replacement in MASKS:
         text = pattern.sub(replacement, text)
-    # trailing whitespace differences are never interesting
-    body = "\n".join(line.rstrip() for line in text.splitlines()) + "\n"
+    lines = [line.rstrip() for line in text.splitlines()]
+
+    # Two things about a stream of decoded samples move between runs and
+    # neither is interesting. The columns are padded to the width of the
+    # value, so a sign change shifts the spacing by one; and how many samples
+    # land in a fixed window depends on timing, so a 2 s window at 0.4 s
+    # intervals gives four lines or five. Collapse runs of spaces once the
+    # values are masked, then fold consecutive identical lines into one, so a
+    # golden records the shape of a sample line and not how many arrived.
+    lines = [re.sub(r"  +", " ", line) if "<value>" in line else line
+             for line in lines]
+    folded = []
+    for line in lines:
+        if folded and line == folded[-1] and "<value>" in line:
+            continue
+        folded.append(line)
+
+    body = "\n".join(folded) + "\n"
     return f"{FINGERPRINT_PREFIX}{mask_fingerprint()}\n{body}"
 
 
