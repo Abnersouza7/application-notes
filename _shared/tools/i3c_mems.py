@@ -333,6 +333,14 @@ class Bus:
         after = self.ibi_payload_cap(address)
         return before, after, after != before
 
+    def set_ibi_payload_cap(self, address, cap):
+        """Put a target's declared maximum IBI payload back to a given value."""
+        ok, response = self.try_call(self.device.i3cGETMRL, address)
+        payload = payload_of(response) if ok else None
+        read_length = ((payload[0] << 8) | payload[1]) if payload and len(payload) > 1 else 0x0010
+        self.try_call(self.device.i3cDirectSETMRL, address, read_length, cap)
+        return self.ibi_payload_cap(address)
+
     def accept_ibis(self, address, payload_length=8):
         from binhosupernova.commands.i3c.definitions import (
             TargetType, TargetInterruptRequest, ControllerRoleRequest,
@@ -1302,25 +1310,65 @@ def probe_identity(bus, address, profile):
 
 
 def probe_length_limits(bus, address):
-    """SETMWL / SETMRL: set a value and read it back."""
+    """SETMWL / SETMRL: set a value the part is not already holding, then put
+    it back.
+
+    The naive version of this test sends a fixed value and asks whether the
+    reported one changed. That fails twice over. A part already holding the
+    value is reported as not implementing the command, so a second run
+    disagrees with the first; and the value is left behind, which for MRL
+    means the maximum read length and the maximum IBI payload are both left
+    wherever the probe put them. The IBI payload one is load-bearing: an
+    interrupt longer than the adapter accepts is discarded silently, so a
+    probe that raises it can stop a later measurement seeing any interrupts
+    at all.
+
+    So this reads first, picks a trial value that differs from what is there,
+    and restores the original including MRL's IBI payload byte.
+    """
     out = []
-    for label, setter, getter, value in (
-            ("SETMWL / GETMWL", bus.device.i3cDirectSETMWL,
-             bus.device.i3cGETMWL, 64),
-            ("SETMRL / GETMRL", bus.device.i3cDirectSETMRL,
-             bus.device.i3cGETMRL, 32)):
-        ok_before, before = bus.try_call(getter, address)
-        bus.try_call(setter, address, value)
-        ok_after, after = bus.try_call(getter, address)
-        if not (ok_before and ok_after):
-            out.append((label, UNDETERMINED, "the getter did not answer"))
-            continue
-        b, a = payload_of(before), payload_of(after)
-        if a != b:
-            out.append((label, SUPPORTED, f"{b} then set {value} then {a}"))
+
+    def get(getter):
+        ok, response = bus.try_call(getter, address)
+        return payload_of(response) if ok else None
+
+    # ---- MWL, a single 16-bit value
+    before = get(bus.device.i3cGETMWL)
+    if before is None or len(before) < 2:
+        out.append(("SETMWL / GETMWL", UNDETERMINED, "GETMWL did not answer"))
+    else:
+        original = (before[0] << 8) | before[1]
+        trial = 0x0040 if original != 0x0040 else 0x0020
+        bus.try_call(bus.device.i3cDirectSETMWL, address, trial)
+        after = get(bus.device.i3cGETMWL)
+        got = ((after[0] << 8) | after[1]) if after and len(after) > 1 else None
+        if got == trial:
+            out.append(("SETMWL / GETMWL", SUPPORTED,
+                        f"{original} then set {trial} then {got}"))
         else:
-            out.append((label, NOT_IMPLEMENTED,
-                        f"{b} unchanged after setting {value}"))
+            out.append(("SETMWL / GETMWL", NOT_IMPLEMENTED,
+                        f"{original} unchanged after setting {trial}"))
+        bus.try_call(bus.device.i3cDirectSETMWL, address, original)
+
+    # ---- MRL, a 16-bit read length plus a maximum IBI payload byte
+    before = get(bus.device.i3cGETMRL)
+    if before is None or len(before) < 2:
+        out.append(("SETMRL / GETMRL", UNDETERMINED, "GETMRL did not answer"))
+        return out
+    original = (before[0] << 8) | before[1]
+    ibi_payload = before[2] if len(before) > 2 else None
+    trial = 0x0020 if original != 0x0020 else 0x0010
+    bus.try_call(bus.device.i3cDirectSETMRL, address, trial, ibi_payload)
+    after = get(bus.device.i3cGETMRL)
+    got = ((after[0] << 8) | after[1]) if after and len(after) > 1 else None
+    detail = f"{original} then set {trial} then {got}"
+    if ibi_payload is not None:
+        detail += f", maximum IBI payload {ibi_payload} throughout"
+    out.append(("SETMRL / GETMRL",
+                SUPPORTED if got == trial else NOT_IMPLEMENTED,
+                detail if got == trial else
+                f"{original} unchanged after setting {trial}"))
+    bus.try_call(bus.device.i3cDirectSETMRL, address, original, ibi_payload)
     return out
 
 
@@ -1614,10 +1662,31 @@ def probe_ibi(bus, address, profile, seconds=3.0):
     out = []
     bus.quiesce(address)
     bus.accept_ibis(address)
+    # The declared payload has to fit what the adapter accepts or every
+    # interrupt is discarded with no error, and start_stream arranges that.
+    # Capture what the target asked for first, so the row below can report the
+    # negotiation and the cap can be put back at the end.
+    declared = bus.ibi_payload_cap(address)
+    timestamp = bus.ibi_timestamp_overhead(address)
     try:
         profile.start_stream(bus, address, route_ibi=True)
     except MemsError as exc:
         return [("IBI", UNDETERMINED, f"could not set the part up: {exc}")]
+
+    fitted = bus.ibi_payload_cap(address)
+    budget = bus.MAX_IBI_PAYLOAD - timestamp
+    if declared is not None and fitted is not None and fitted != declared:
+        out.append(("IBI payload negotiation", SUPPORTED,
+                    f"the target declared {declared} byte(s), the adapter takes "
+                    f"{bus.MAX_IBI_PAYLOAD}"
+                    + (f" less {timestamp} for the timing-control timestamp"
+                       if timestamp else "")
+                    + f", so it was asked for {fitted}; without this every "
+                      f"interrupt is discarded and nothing reports it"))
+    elif declared is not None:
+        out.append(("IBI payload negotiation", SUPPORTED,
+                    f"the target declared {declared} byte(s), within the "
+                    f"{budget} the adapter takes, so nothing had to change"))
 
     bus.drain_ibis(settle=0.05)
     before = len(bus.collect_ibis(0.7))
@@ -1640,6 +1709,9 @@ def probe_ibi(bus, address, profile, seconds=3.0):
     elapsed = time.monotonic() - started
     rate = len(got) / elapsed if elapsed else 0.0
     expected = profile.expected_ibi_rate()
+
+    if declared is not None and bus.ibi_payload_cap(address) != declared:
+        bus.set_ibi_payload_cap(address, declared)
 
     if got:
         detail = f"{len(got)} in {elapsed:.2f} s = {rate:.2f}/s"
