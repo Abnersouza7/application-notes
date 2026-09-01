@@ -1,4 +1,4 @@
-# mask-fingerprint: 41f66580892b
+# mask-fingerprint: b918a1960c13
 bmp581  (Bosch Sensortec, barometric pressure sensor)
   dynamic address <addr>
 

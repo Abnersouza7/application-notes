@@ -1,9 +1,5 @@
-# mask-fingerprint: 41f66580892b
+# mask-fingerprint: b918a1960c13
 bmp581 at <addr>, 2 s
   breathe on it or lift it and the pressure changes; about 12 Pa per meter of altitude
 
-  temperature    <value> C   pressure <value> Pa   pressure  <value> hPa
-  temperature    <value> C   pressure <value> Pa   pressure  <value> hPa
-  temperature    <value> C   pressure <value> Pa   pressure  <value> hPa
-  temperature    <value> C   pressure <value> Pa   pressure  <value> hPa
-  temperature    <value> C   pressure <value> Pa   pressure  <value> hPa
+ temperature <value> C pressure <value> Pa pressure <value> hPa
