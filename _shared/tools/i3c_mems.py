@@ -33,7 +33,7 @@ import sys
 import time
 from collections import Counter
 
-TOOL_VERSION = "1.1"
+TOOL_VERSION = "1.2"
 
 # --------------------------------------------------------------------------
 # Errors

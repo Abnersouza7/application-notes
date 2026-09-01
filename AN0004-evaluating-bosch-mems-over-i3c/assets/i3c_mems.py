@@ -33,7 +33,7 @@ import sys
 import time
 from collections import Counter
 
-TOOL_VERSION = "1.1"
+TOOL_VERSION = "1.2"
 
 # --------------------------------------------------------------------------
 # Errors
@@ -104,6 +104,7 @@ class Bus:
         self.verbose = verbose
         self._responses = queue.Queue()
         self.ibis = queue.Queue()
+        self.events = queue.Queue()
         self._next_id = 0
         self._opened = False
 
@@ -139,15 +140,48 @@ class Bus:
 
     # -- plumbing ----------------------------------------------------------
 
+    # A notification carries id 0. Only one kind of notification is an
+    # in-band interrupt, and the rest have to be kept out of the interrupt
+    # queue or they are counted as interrupts that never happened.
+    IBI_NOTIFICATION = "I3C CONTROLLER IBI REQUEST NOTIFICATION"
+
     def _on_event(self, response, system_message):
         # Called from the SDK receive thread, so it must return promptly.
         if response is None:
             return
         if isinstance(response, dict) and response.get("id") == 0:
             response["_t"] = time.monotonic()
-            self.ibis.put(response)
+            if response.get("command") == self.IBI_NOTIFICATION:
+                self.ibis.put(response)
+            else:
+                # Hot-join, target bus events, and anything the adapter emits
+                # when the bus is in trouble. Measured on the LSM6DSV: a
+                # misconfigured interrupt source produced about a thousand of
+                # these per second, with empty payloads and result codes the
+                # SDK has no name for, and counting them as interrupts said
+                # the part supported a feature it had not demonstrated.
+                self.events.put(response)
         else:
             self._responses.put(response)
+
+    def drain_events(self):
+        """Return and clear the non-interrupt notifications seen so far."""
+        out = []
+        while True:
+            try:
+                out.append(self.events.get_nowait())
+            except queue.Empty:
+                return out
+
+    def event_summary(self):
+        """Describe the non-interrupt notifications, for reporting."""
+        seen = self.drain_events()
+        if not seen:
+            return None
+        kinds = Counter((n.get("command"), n.get("result")) for n in seen)
+        parts = [f"{count} x {command or '?'} / {result or '?'}"
+                 for (command, result), count in kinds.most_common(4)]
+        return f"{len(seen)} non-interrupt notification(s): " + ", ".join(parts)
 
     def call(self, method, *args, timeout=5.0, allowed=(), **kwargs):
         """Send a request and block for the response carrying the same id."""
@@ -239,6 +273,66 @@ class Bus:
                              timeout=10.0)
         return response.get("table") or []
 
+    # The adapter will not deliver an in-band interrupt from a target whose
+    # declared maximum IBI payload is larger than this. Measured by sweeping
+    # the target's own GETMRL third byte against a fixed adapter setting: caps
+    # of 1, 2, 4, 7 and 8 all deliver, and the payload arrives at exactly the
+    # declared size; 9 and 10 deliver nothing at all, silently. The
+    # maxIbiPayloadLength field of SetTargetDeviceConfiguration makes no
+    # difference to this, at 1, 2, 4, 8 or 16, which matches the target table
+    # reporting max_ibi_payload_length as 0 whatever is asked for.
+    MAX_IBI_PAYLOAD = 8
+
+    # I3C timing control adds a timestamp ahead of the target's own interrupt
+    # payload, and it counts against the same eight byte limit. Measured on
+    # the LSM6DSV with timing control engaged: a declared cap of 8 delivers
+    # nothing, 5 delivers an 8 byte payload and 4 delivers a 7 byte one, so
+    # the timestamp is exactly three bytes and the total is what is capped.
+    IBI_TIMESTAMP_BYTES = 3
+
+    def ibi_timestamp_overhead(self, address):
+        """Bytes the timestamp will add to this target's interrupt payload.
+
+        GETXTIME's second byte is non-zero once timing control is engaged.
+        Note this survives a power cycle of the target, which is how it can be
+        told apart from target state: the controller holds it, because the
+        controller is what has to expect the timestamp.
+        """
+        ok, response = self.try_call(self.device.i3cGETXTIME, address)
+        payload = payload_of(response) if ok else None
+        if payload and len(payload) > 1 and payload[1]:
+            return self.IBI_TIMESTAMP_BYTES
+        return 0
+
+    def ibi_payload_cap(self, address):
+        """The target's own declared maximum IBI payload, or None."""
+        ok, response = self.try_call(self.device.i3cGETMRL, address)
+        payload = payload_of(response) if ok else None
+        return payload[2] if payload and len(payload) > 2 else None
+
+    def fit_ibi_payload(self, address):
+        """Bring a target's declared IBI payload within what the adapter takes.
+
+        A target may legitimately declare a maximum IBI payload larger than the
+        controller can accept, and nothing on either side reports the mismatch:
+        the target raises interrupts, the controller never delivers one, and
+        every register on the target says the interrupt fired. Measured on the
+        LSM6DSV, which declares 10 and goes completely silent until it is asked
+        for 8 or fewer, at which point it streams normally.
+
+        Returns (cap_before, cap_after, changed).
+        """
+        allowed = self.MAX_IBI_PAYLOAD - self.ibi_timestamp_overhead(address)
+        before = self.ibi_payload_cap(address)
+        if before is None or before <= allowed:
+            return before, before, False
+        ok, response = self.try_call(self.device.i3cGETMRL, address)
+        payload = payload_of(response) if ok else None
+        read_length = ((payload[0] << 8) | payload[1]) if payload and len(payload) > 1 else 0x0010
+        self.try_call(self.device.i3cDirectSETMRL, address, read_length, allowed)
+        after = self.ibi_payload_cap(address)
+        return before, after, after != before
+
     def accept_ibis(self, address, payload_length=8):
         from binhosupernova.commands.i3c.definitions import (
             TargetType, TargetInterruptRequest, ControllerRoleRequest,
@@ -256,6 +350,22 @@ class Bus:
                 "pendingReadCapability": PendingReadCapability.DISABLE_AUTOMATIC_READ,
                 "maxIbiPayloadLength": payload_length,
             })
+
+    def enable_ibis(self, address, payload_length=8):
+        """Configure the adapter to accept this target's interrupts, and make
+        sure the target is not asking for a bigger payload than it can take.
+
+        accept_ibis on its own is not enough, and that cost most of a bench
+        session: it configures the controller and says nothing about the
+        target, so a target declaring an oversized IBI payload stays silent
+        with every indication that it should not be.
+        """
+        result = self.accept_ibis(address, payload_length=payload_length)
+        overhead = self.ibi_timestamp_overhead(address)
+        before, after, changed = self.fit_ibi_payload(address)
+        return {"configured": result, "payload_cap_before": before,
+                "payload_cap_after": after, "changed": changed,
+                "timestamp_bytes": overhead}
 
     def power_cycle(self, settle=1.5, voltage_mv=3300):
         """Collapse the I3C rail and bring it back, power-cycling the target.
@@ -364,6 +474,7 @@ class Bus:
                     drained += 1
                 except queue.Empty:
                     break
+        self.drain_events()
         return drained
 
     def collect_ibis(self, seconds, on_each=None):
@@ -881,11 +992,165 @@ class Lps22df(Profile):
         return decoded
 
 
+class Lsm6dsv(Profile):
+    """LSM6DSV, on the STEVAL-MKI239AA.
+
+    Three things about this part are not guessable and each of them, on its
+    own, produces a working-looking configuration that delivers nothing.
+
+    Its interrupt functions are gated by FUNCTIONS_ENABLE bit 7, and they are
+    routed through MD1_CFG rather than INT1_CTRL. Data-ready is the exception
+    and does go through INT1_CTRL.
+
+    It declares a maximum IBI payload of ten bytes in GETMRL and pads its
+    interrupt payload to whatever it has declared, and the adapter discards
+    any interrupt longer than eight. So its interrupts have to be brought
+    within that limit before any of them arrive, which is what
+    Bus.enable_ibis does.
+
+    CTRL3.IF_INC has to be set for a multi-byte read to walk the register
+    file. With it clear, a six byte read of the output registers returns the
+    first register six times, so the axes all read alike, the data is never
+    fully read, and data-ready never clears: one interrupt and then silence.
+    """
+    name = "lsm6dsv"
+    vendor = "STMicroelectronics"
+    kind = "6-axis IMU"
+
+    data_width = 1
+    read_dummy = 0
+
+    chip_id_register = 0x0F                  # WHO_AM_I
+    chip_id_expected = 0x70
+    device_id_expected = 0x0070
+    bcr_expected = 0x07
+    dcr_expected = 0x44
+
+    IF_CFG, INT1_CTRL, INT2_CTRL, WHO_AM_I = 0x03, 0x0D, 0x0E, 0x0F
+    CTRL1, CTRL3, CTRL4, CTRL5, CTRL8 = 0x10, 0x12, 0x13, 0x14, 0x17
+    ALL_INT_SRC, STATUS_REG = 0x1D, 0x1E
+    OUTX_L_A = 0x28
+    WAKE_UP_SRC = 0x45
+    FUNCTIONS_ENABLE = 0x50
+    TAP_CFG0, WAKE_UP_THS, WAKE_UP_DUR, MD1_CFG = 0x56, 0x5B, 0x5C, 0x5E
+
+    IF_INC = 1 << 2                          # CTRL3
+    SW_RESET = 1 << 0                        # CTRL3
+    INT1_DRDY_XL = 1 << 0                    # INT1_CTRL
+    INTERRUPTS_ENABLE = 1 << 7               # FUNCTIONS_ENABLE
+    ODR_60HZ = 0x05                          # CTRL1 ODR field, high performance
+    ODR_HZ = 60.0
+    LSB_PER_G = 16384.0                      # +/- 2 g full scale
+    STATIC_ADDRESS = 0x6A                    # 0x6B with SDO high
+
+    # Wake-up threshold, which nothing else depends on while the interrupt
+    # functions are disabled. Verified to round-trip before use.
+    scratch_register = 0x5B
+
+    observable = ("tilt the board and the accelerometer axes change sign; "
+                  "at rest the magnitude is about 1 g")
+
+    registers = ((0x03, "IF_CFG"), (0x0D, "INT1_CTRL"), (0x0F, "WHO_AM_I"),
+                 (0x10, "CTRL1"), (0x12, "CTRL3"), (0x14, "CTRL5"),
+                 (0x17, "CTRL8"), (0x1D, "ALL_INT_SRC"), (0x1E, "STATUS_REG"),
+                 (0x28, "OUTX_L_A"), (0x50, "FUNCTIONS_ENABLE"),
+                 (0x56, "TAP_CFG0"), (0x5E, "MD1_CFG"))
+
+    def start_stream(self, bus, address, route_ibi=False):
+        # IF_INC first, because every read below depends on it.
+        current, _ = bus.read_reg(address, self.CTRL3, self)
+        bus.write_reg(address, self.CTRL3, current | self.IF_INC, self)
+        bus.write_reg(address, self.CTRL8, 0x00, self)        # +/- 2 g
+        bus.write_reg(address, self.CTRL1, self.ODR_60HZ, self)
+        time.sleep(0.2)
+        bus.read_regs(address, self.OUTX_L_A, 6, self)        # clear data-ready
+        if route_ibi:
+            # Without this the target asks for a payload the adapter will not
+            # deliver, and every interrupt is discarded with no error.
+            bus.enable_ibis(address)
+            bus.write_reg(address, self.INT1_CTRL, self.INT1_DRDY_XL, self)
+        return True
+
+    def stop_stream(self, bus, address):
+        bus.write_reg(address, self.INT1_CTRL, 0x00, self)
+        bus.write_reg(address, self.MD1_CFG, 0x00, self)
+        bus.write_reg(address, self.FUNCTIONS_ENABLE, 0x00, self)
+        bus.write_reg(address, self.CTRL1, 0x00, self)
+        return True
+
+    def read_sample(self, bus, address):
+        raw, _ = bus.read_regs(address, self.OUTX_L_A, 6, self)
+        axes = []
+        for i in range(0, 6, 2):
+            value = raw[i] | (raw[i + 1] << 8)
+            axes.append(value - 0x10000 if value & 0x8000 else value)
+        magnitude = sum(a * a for a in axes) ** 0.5 / self.LSB_PER_G
+        return [("x", axes[0] / self.LSB_PER_G, "g"),
+                ("y", axes[1] / self.LSB_PER_G, "g"),
+                ("z", axes[2] / self.LSB_PER_G, "g"),
+                ("magnitude", magnitude, "g")]
+
+    def route_interrupt_to_ibi(self, bus, address):
+        bus.enable_ibis(address)
+        bus.write_reg(address, self.INT1_CTRL, self.INT1_DRDY_XL, self)
+        return True
+
+    def clear_interrupt(self, bus, address):
+        # Data-ready clears when the output registers are read, not when the
+        # status register is. Reading STATUS_REG instead gives one interrupt
+        # and then silence, which looks exactly like an unsupported feature.
+        bus.read_regs(address, self.OUTX_L_A, 6, self)
+        return None
+
+    def interrupt_mode(self):
+        return "data-ready through INT1_CTRL, cleared by reading the sample"
+
+    def expected_ibi_rate(self):
+        return self.ODR_HZ
+
+    def decode_mdb(self, byte):
+        return {"data ready": bool(byte & 0x02),
+                "wake-up or basic interrupt function": bool(byte & 0x04),
+                "raw": f"0x{byte:02X}"}
+
+    # As on the LPS22DF, timing control inserts a three byte timestamp after
+    # the mandatory data byte and moves everything behind it. Bit 7 of the
+    # mandatory byte says whether it is there.
+    MDB_TIMESTAMP = 1 << 7
+    SOURCE_OFFSET, SOURCE_OFFSET_TIMESTAMPED = 3, 6
+
+    def decode_payload(self, payload):
+        """Pull the interrupt source byte out, wherever it currently sits."""
+        if not payload:
+            return {}
+        timestamped = bool(payload[0] & self.MDB_TIMESTAMP)
+        offset = (self.SOURCE_OFFSET_TIMESTAMPED if timestamped
+                  else self.SOURCE_OFFSET)
+        if len(payload) <= offset:
+            return {}
+        source = payload[offset]
+        decoded = {"SLEEP_CHANGE": (source >> 5) & 1, "D6D": (source >> 4) & 1,
+                   "TAP": (source >> 2) & 1, "WU": (source >> 1) & 1,
+                   "FF": source & 1}
+        if timestamped:
+            decoded["timestamp"] = hex_bytes(payload[1:4])
+        return decoded
+
+    def clear_latched_modes(self, bus, address):
+        # SW_RESET clears IF_INC as well, so it has to be put back or the next
+        # multi-byte read silently returns one register repeatedly.
+        bus.write_reg(address, self.CTRL3, self.SW_RESET, self)
+        time.sleep(0.3)
+        bus.write_reg(address, self.CTRL3, self.IF_INC, self)
+        return True
+
+
 PROFILES = {
     "bmi323": Bmi323,
     "bmp581": Bmp581,
     "bmp585": Bmp585,
     "lps22df": Lps22df,
+    "lsm6dsv": Lsm6dsv,
 }
 
 
@@ -1326,8 +1591,14 @@ def probe_ibi(bus, address, profile, seconds=3.0):
                 f"{before} in 0.7 s"
                 + ("" if before == 0 else ", so something enabled them early")))
 
-    ok, response = bus.try_call(bus.device.i3cDirectENEC, address, [ENEC.ENINT])
+    # Drain before enabling, never after. A drain after ENEC discards the
+    # first interrupt without running clear_interrupt, and on a part whose
+    # interrupt is a level the host has to clear, that is a deadlock: the
+    # source stays asserted, no further interrupt is raised, and the window
+    # sees nothing. Measured on the LSM6DSV, which reports its full 60 Hz
+    # through cmd_ibi and reported zero here for exactly this reason.
     bus.drain_ibis(settle=0.05)
+    ok, response = bus.try_call(bus.device.i3cDirectENEC, address, [ENEC.ENINT])
     started = time.monotonic()
     got = bus.collect_ibis(seconds,
                            on_each=lambda _n: profile.clear_interrupt(bus, address))
