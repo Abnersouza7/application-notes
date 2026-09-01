@@ -1,9 +1,5 @@
-# mask-fingerprint: 41f66580892b
+# mask-fingerprint: b918a1960c13
 bmp585 at <addr>, 2 s
   breathe on it or lift it and the pressure changes; about 12 Pa per meter of altitude; this is the media-resistant part, so a drop of water on the gel is survivable where the BMP581 would not be
 
-  temperature    <value> C   pressure <value> Pa   pressure  <value> hPa
-  temperature    <value> C   pressure <value> Pa   pressure  <value> hPa
-  temperature    <value> C   pressure <value> Pa   pressure  <value> hPa
-  temperature    <value> C   pressure <value> Pa   pressure  <value> hPa
-  temperature    <value> C   pressure <value> Pa   pressure  <value> hPa
+ temperature <value> C pressure <value> Pa pressure <value> hPa

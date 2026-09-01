@@ -1745,6 +1745,37 @@ def probe_control(bus, address, profile, table):
              f"report a refusal, so the results above are weaker evidence")]
 
 
+def interrupt_rate(notifications):
+    """Rate measured from the interrupts' own arrival times.
+
+    Dividing a count by the wall-clock window is wrong at both ends. Enabling
+    interrupts on a part that already has a sample waiting delivers one
+    immediately, which is a catch-up event rather than part of the periodic
+    stream, and it inflates a short window by a whole interrupt: the BMP581
+    read 21 or 22 in a 2 s window where its true 10 Hz predicts 20.
+
+    Draining the queue after ENEC used to hide that, by throwing the catch-up
+    interrupt away. It also threw away the first interrupt on a part whose
+    source is a level the host has to clear, and that is a deadlock: the
+    source stays asserted and nothing further is raised. The LSM6DSV reported
+    zero for exactly that reason while the same part streamed normally
+    elsewhere.
+
+    So neither end of the window is trustworthy, and the fix is not to measure
+    the window at all. N interrupts have N-1 intervals between them, and the
+    span from first to last is what those intervals occupy. That is immune to
+    a catch-up interrupt at the start, to the window closing between arrivals,
+    and to how long the host took to get from ENEC to its first read.
+    """
+    if len(notifications) < 2:
+        return None
+    stamps = sorted(n.get("_t", 0.0) for n in notifications)
+    span = stamps[-1] - stamps[0]
+    if span <= 0:
+        return None
+    return (len(stamps) - 1) / span
+
+
 def probe_ibi(bus, address, profile, seconds=3.0):
     """Enable, count, decode, disable. The rate is checked against the ODR."""
     from binhosupernova.commands.i3c.definitions import ENEC, DISEC
@@ -1796,7 +1827,10 @@ def probe_ibi(bus, address, profile, seconds=3.0):
     got = bus.collect_ibis(seconds,
                            on_each=lambda _n: profile.clear_interrupt(bus, address))
     elapsed = time.monotonic() - started
-    rate = len(got) / elapsed if elapsed else 0.0
+    # Measured between arrivals, not across the window. See interrupt_rate.
+    rate = interrupt_rate(got)
+    if rate is None:
+        rate = len(got) / elapsed if elapsed else 0.0
     expected = profile.expected_ibi_rate()
 
     if declared is not None and bus.ibi_payload_cap(address) != declared:
@@ -2070,7 +2104,9 @@ def cmd_ibi(args):
         except KeyboardInterrupt:
             got = []
         elapsed = time.monotonic() - started
-        rate = len(got) / elapsed if elapsed else 0.0
+        rate = interrupt_rate(got)
+        if rate is None:
+            rate = len(got) / elapsed if elapsed else 0.0
         print(f"\n  {len(got)} interrupts in {elapsed:.2f} s = {rate:.2f}/s")
         expected = profile.expected_ibi_rate()
         if expected:

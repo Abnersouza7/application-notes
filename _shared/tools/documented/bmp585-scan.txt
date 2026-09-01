@@ -1,4 +1,4 @@
-# mask-fingerprint: 41f66580892b
+# mask-fingerprint: b918a1960c13
 1 target(s) on the bus at 3300 mV, PUSH_PULL_5_MHZ_50_DC, OPEN_DRAIN_1_MHZ
 
   dynamic address <addr>

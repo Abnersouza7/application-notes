@@ -1,4 +1,4 @@
-# mask-fingerprint: 41f66580892b
+# mask-fingerprint: b918a1960c13
 bmp585 at <addr>, adapter rates PUSH_PULL_5_MHZ_50_DC / OPEN_DRAIN_1_MHZ at 3300 mV
 
   feature                     verdict           evidence
@@ -7,25 +7,26 @@ bmp585 at <addr>, adapter rates PUSH_PULL_5_MHZ_50_DC / OPEN_DRAIN_1_MHZ at 3300
   GETBCR                      supported         0x06
   GETDCR                      supported         0x62
   control: refusal reporting  supported         GETPID, SETMWL and a private read at the unoccupied address <addr> were all refused, so a SUCCESS above means the target accepted the command
-  SETMWL / GETMWL             not implemented   [50, 50] unchanged after setting 64
-  SETMRL / GETMRL             not implemented   [50, 50, 50] unchanged after setting 32
+  SETMWL / GETMWL             not implemented   12850 unchanged after setting 64
+  SETMRL / GETMRL             not implemented   12850 unchanged after setting 32
   SETGRPA / RSTGRPA           not implemented   write to <addr> through 0x20: before refused, assigned refused, released refused
   HDR modes                   not implemented   BCR bit 5 clear, so the target declares SDR only
   GETHDRCAP (0x95)            not implemented   answers 00, so no HDR modes
   HDR-DDR read attempt        undetermined      returned SUCCESS, which is not diagnostic; bus intact afterwards
-  ENTAS0                      undetermined      returned SUCCESS; proving an activity state needs a current measurement
-  ENTAS1                      undetermined      returned SUCCESS; proving an activity state needs a current measurement
-  ENTAS2                      undetermined      returned SUCCESS; proving an activity state needs a current measurement
-  ENTAS3                      undetermined      returned SUCCESS; proving an activity state needs a current measurement
+  ENTAS0                      undetermined      accepted <n> of <m> attempts; proving an activity state needs a current measurement
+  ENTAS1                      undetermined      accepted <n> of <m> attempts; proving an activity state needs a current measurement
+  ENTAS2                      undetermined      accepted <n> of <m> attempts; proving an activity state needs a current measurement
+  ENTAS3                      undetermined      accepted <n> of <m> attempts; proving an activity state needs a current measurement
   RSTACT                      undetermined      returned SUCCESS; no observable effect from the host side
   GETMXDS                     undetermined      answers 32 32 32 32 32; a part that implements it reports real limits
+  IBI payload negotiation     supported         the target declared 50 byte(s), the adapter takes 8, so it was asked for 0; without this every interrupt is discarded and nothing reports it
   IBI before ENEC             not implemented   <n> in <seconds>
   ENEC and IBI delivery       supported         <n> in <seconds> = <rate>, against a configured 10 Hz (<error>)
   IBI mandatory data byte     supported         0x01: data ready=True, FIFO full=False, FIFO threshold=False, pressure out of range=False
-  IBI payloads seen           supported         {(<mdb>,): <n>}
+  IBI payloads seen           supported         {<payloads>: <n>}
   DISEC stops them            supported         the stream stopped after <n> DISEC attempts
   hot-join                    not implemented   no hot-join notification at any point
-  SETXTIME / GETXTIME         supported         <before> then <after> after SETXTIME <subcommand>
+  SETXTIME / GETXTIME         supported         <before> then <after> after SETXTIME <subcommand>; timing control disabled again afterwards
   SETNEWDA                    supported         moved 0x08 to <addr> and the old address stopped answering
   RSTDAA                      supported         the table dropped to [<addrs>] and 0x0A stopped answering
   the part was reset afterwards, to undo the modes this battery latched
