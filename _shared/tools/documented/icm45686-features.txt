@@ -1,0 +1,37 @@
+# mask-fingerprint: b918a1960c13
+icm45686 at <addr>, adapter rates PUSH_PULL_5_MHZ_50_DC / OPEN_DRAIN_1_MHZ at 3300 mV
+
+  feature                     verdict           evidence
+  --------------------------  ----------------  --------
+  GETBCR                      supported         0x27
+  GETDCR                      supported         0x44
+  control: refusal reporting  supported         GETPID, SETMWL and a private read at the unoccupied address <addr> were all refused, so a SUCCESS above means the target accepted the command
+  SETMWL / GETMWL             supported         4095 then set 64 then 64
+  SETMRL / GETMRL             supported         4095 then set 32 then 32, maximum IBI payload 1 throughout
+  SETGRPA / RSTGRPA           not implemented   write to <addr> through 0x20: before refused, assigned refused, released refused
+  HDR modes                   undetermined      BCR bit 5 set, so advanced capabilities are claimed
+  GETHDRCAP (0x95)            undetermined      answers 01
+  HDR-DDR against SDR         supported         register 0x32 reads 6C 36 02 00 over SDR and 6C 36 02 00 over HDR-DDR, the same bytes by both routes
+  bus after HDR-DDR           supported         SDR transfers still work, so the exit pattern returned the bus to single data rate
+  ENTAS0                      undetermined      accepted <n> of <m> attempts; proving an activity state needs a current measurement
+  ENTAS1                      undetermined      accepted <n> of <m> attempts; proving an activity state needs a current measurement
+  ENTAS2                      undetermined      accepted <n> of <m> attempts; proving an activity state needs a current measurement
+  ENTAS3                      undetermined      accepted <n> of <m> attempts; proving an activity state needs a current measurement
+  RSTACT                      undetermined      returned SUCCESS; no observable effect from the host side
+  GETMXDS                     undetermined      answers 00 00; a part that implements it reports real limits
+  IBI payload negotiation     supported         the target declared 1 byte(s), within the 8 the adapter takes, so nothing had to change
+  IBI before ENEC             not implemented   <n> in <seconds>
+  ENEC and IBI delivery       supported         <n> in <seconds> = <rate>, against a configured 50 Hz (<error>)
+  IBI mandatory data byte     supported         0x01: pending read (bit 7)=False, device-specific (bits 6:0)=0x01
+  IBI payloads seen           supported         {<payloads>: <n>}
+  DISEC stops them            supported         the stream stopped after <n> DISEC attempts
+  hot-join                    not implemented   no hot-join notification at any point
+  SETXTIME / GETXTIME         supported         <before> then <after> after SETXTIME <subcommand>; timing control disabled again afterwards
+  SETNEWDA                    supported         moved 0x08 to <addr> and the old address stopped answering
+  RSTDAA                      supported         accepted, and the address was released on some attempts but not all, so a host should confirm rather than assume
+  the part was reset afterwards, to undo the modes this battery latched
+  <counts>
+  a verdict of undetermined means the command completed and nothing measurable changed.
+  it is not a no: some targets accept and discard commands they do not implement
+  and some refuse them, and which one a target does is a property of that target.
+  So a success alone is never evidence of support, because a refusal is not guaranteed to arrive.

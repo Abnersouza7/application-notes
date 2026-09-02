@@ -1,0 +1,8 @@
+# mask-fingerprint: b918a1960c13
+icm45686 at <addr>: interrupt routed to the I3C IBI, data-ready through INT1_CONFIG0, cleared by reading INT1_STATUS0
+  IBI from <addr>  MDB 01  pending read (bit 7)=False, device-specific (bits 6:0)=0x01
+  IBI from <addr>  MDB 01  pending read (bit 7)=False, device-specific (bits 6:0)=0x01
+
+  <n> interrupts in <seconds> = <rate>
+  configured output data rate 50 Hz (<error>)
+  the rate is comparable with the configured rate; individual arrival times are not, because USB coalesces them

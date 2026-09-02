@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" width="640" height="360"
+     font-family="Inter, 'Segoe UI', system-ui, Arial, sans-serif">
+
+  <rect x="0" y="0" width="640" height="360" fill="#FFFFFF"/>
+
+  <text x="320" y="18" text-anchor="middle" font-size="12.5" font-weight="600" fill="#111827">
+    From power-on to measurement data, and which register carries each step
+  </text>
+
+  <defs>
+    <marker id="tip" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#9CA3AF"/>
+    </marker>
+    <marker id="tipdark" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#6B7280"/>
+    </marker>
+  </defs>
+
+  <!-- Stage labels -->
+  <text x="86" y="42" text-anchor="middle" font-size="9.5" font-weight="600"
+        letter-spacing="0.6" fill="#6B7280">1. ENUMERATE</text>
+  <text x="242" y="42" text-anchor="middle" font-size="9.5" font-weight="600"
+        letter-spacing="0.6" fill="#6B7280">2. BOOTMONITOR</text>
+  <text x="398" y="42" text-anchor="middle" font-size="9.5" font-weight="600"
+        letter-spacing="0.6" fill="#6B7280">3. DOWNLOAD</text>
+  <text x="554" y="42" text-anchor="middle" font-size="9.5" font-weight="600"
+        letter-spacing="0.6" fill="#6B7280">4. MEASURE</text>
+  <path d="M20 50 L620 50" stroke="#D9E1EE" stroke-width="1"/>
+
+  <!-- Stage boxes -->
+  <rect x="20" y="68" width="132" height="60" rx="4" fill="#F3F6FB" stroke="#C7D2E4"/>
+  <text x="86" y="88" text-anchor="middle" font-size="11" font-weight="600" fill="#111827">RSTDAA, ENTDAA</text>
+  <text x="86" y="104" text-anchor="middle" font-size="9.5" fill="#374151">address assigned</text>
+  <text x="86" y="118" text-anchor="middle" font-size="9.5" fill="#374151">BCR, DCR, PID read</text>
+
+  <rect x="176" y="68" width="132" height="60" rx="4" fill="#F3F6FB" stroke="#C7D2E4"/>
+  <text x="242" y="88" text-anchor="middle" font-size="11" font-weight="600" fill="#111827">ENABLE 0xF8</text>
+  <text x="242" y="104" text-anchor="middle" font-size="11" font-weight="600" fill="#111827">RESET 0xF7</text>
+  <text x="242" y="120" text-anchor="middle" font-size="9.5" fill="#374151">then enumerate again</text>
+
+  <rect x="332" y="68" width="132" height="60" rx="4" fill="#F3F6FB" stroke="#C7D2E4"/>
+  <text x="398" y="88" text-anchor="middle" font-size="11" font-weight="600" fill="#111827">CMD_STAT 0x08</text>
+  <text x="398" y="104" text-anchor="middle" font-size="11" font-weight="600" fill="#111827">FIFO 0xFF</text>
+  <text x="398" y="120" text-anchor="middle" font-size="9.5" fill="#374151">14 kB, ~0.7 s</text>
+
+  <rect x="488" y="68" width="132" height="60" rx="4" fill="#EAF3EC" stroke="#B7D6C0"/>
+  <text x="554" y="88" text-anchor="middle" font-size="11" font-weight="600" fill="#111827">CMD_STAT 0x08</text>
+  <text x="554" y="104" text-anchor="middle" font-size="9.5" fill="#374151">load page, write</text>
+  <text x="554" y="118" text-anchor="middle" font-size="9.5" fill="#374151">page and measure</text>
+
+  <path d="M152 98 L176 98" stroke="#9CA3AF" stroke-width="1.4" marker-end="url(#tip)"/>
+  <path d="M308 98 L332 98" stroke="#9CA3AF" stroke-width="1.4" marker-end="url(#tip)"/>
+  <path d="M464 98 L488 98" stroke="#9CA3AF" stroke-width="1.4" marker-end="url(#tip)"/>
+
+  <!-- APP_ID track -->
+  <text x="20" y="160" font-size="9.5" font-weight="600" letter-spacing="0.6"
+        fill="#6B7280">APP_ID (REGISTER 0x00) THROUGHOUT</text>
+  <path d="M20 168 L620 168" stroke="#D9E1EE" stroke-width="1"/>
+
+  <rect x="20" y="180" width="132" height="34" rx="4" fill="#FFF4E5" stroke="#E8CFA3"/>
+  <text x="86" y="196" text-anchor="middle" font-size="10.5" font-weight="600" fill="#B45309">0x02  ROM app</text>
+  <text x="86" y="209" text-anchor="middle" font-size="9" fill="#B45309">rejects measurement</text>
+
+  <rect x="176" y="180" width="132" height="34" rx="4" fill="#F3F6FB" stroke="#C7D2E4"/>
+  <text x="242" y="196" text-anchor="middle" font-size="10.5" font-weight="600" fill="#111827">0x80  bootmonitor</text>
+  <text x="242" y="209" text-anchor="middle" font-size="9" fill="#374151">accepts download</text>
+
+  <rect x="332" y="180" width="132" height="34" rx="4" fill="#F3F6FB" stroke="#C7D2E4"/>
+  <text x="398" y="196" text-anchor="middle" font-size="10.5" font-weight="600" fill="#111827">0x80  bootmonitor</text>
+  <text x="398" y="209" text-anchor="middle" font-size="9" fill="#374151">streaming to FIFO</text>
+
+  <rect x="488" y="180" width="132" height="34" rx="4" fill="#EAF3EC" stroke="#B7D6C0"/>
+  <text x="554" y="196" text-anchor="middle" font-size="10.5" font-weight="600" fill="#111827">0x01  RAM app</text>
+  <text x="554" y="209" text-anchor="middle" font-size="9" fill="#374151">ranging</text>
+
+  <!-- Frame loop -->
+  <text x="20" y="248" font-size="9.5" font-weight="600" letter-spacing="0.6"
+        fill="#6B7280">5. THE FRAME LOOP, ONCE PER MEASUREMENT PERIOD</text>
+  <path d="M20 256 L620 256" stroke="#D9E1EE" stroke-width="1"/>
+
+  <rect x="20" y="270" width="150" height="46" rx="4" fill="#F3F6FB" stroke="#C7D2E4"/>
+  <text x="95" y="288" text-anchor="middle" font-size="10.5" font-weight="600" fill="#111827">INT_STATUS 0xE1</text>
+  <text x="95" y="303" text-anchor="middle" font-size="9" fill="#374151">poll bit 0, clear before read</text>
+
+  <rect x="196" y="270" width="150" height="46" rx="4" fill="#F3F6FB" stroke="#C7D2E4"/>
+  <text x="271" y="288" text-anchor="middle" font-size="10.5" font-weight="600" fill="#111827">read from 0xFA</text>
+  <text x="271" y="303" text-anchor="middle" font-size="9" fill="#374151">5 pre-header bytes, then frame</text>
+
+  <rect x="372" y="270" width="150" height="46" rx="4" fill="#F3F6FB" stroke="#C7D2E4"/>
+  <text x="447" y="288" text-anchor="middle" font-size="10.5" font-weight="600" fill="#111827">continue from 0xFF</text>
+  <text x="447" y="303" text-anchor="middle" font-size="9" fill="#374151">above 1024 bytes per transfer</text>
+
+  <rect x="548" y="270" width="72" height="46" rx="4" fill="#EAF3EC" stroke="#B7D6C0"/>
+  <text x="584" y="290" text-anchor="middle" font-size="10.5" font-weight="600" fill="#111827">decode</text>
+  <text x="584" y="304" text-anchor="middle" font-size="9" fill="#374151">layout byte</text>
+
+  <path d="M170 293 L196 293" stroke="#9CA3AF" stroke-width="1.4" marker-end="url(#tip)"/>
+  <path d="M346 293 L372 293" stroke="#9CA3AF" stroke-width="1.4" marker-end="url(#tip)"/>
+  <path d="M522 293 L548 293" stroke="#9CA3AF" stroke-width="1.4" marker-end="url(#tip)"/>
+
+  <path d="M584 320 L584 334 L95 334 L95 320" fill="none" stroke="#6B7280"
+        stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#tipdark)"/>
+  <text x="340" y="348" text-anchor="middle" font-size="9" fill="#6B7280">
+    32x32 and 48x32 repeat this twice per image, one frame of even rows and one of odd
+  </text>
+
+</svg>

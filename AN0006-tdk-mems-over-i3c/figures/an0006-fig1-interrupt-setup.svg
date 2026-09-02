@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 340" width="640" height="340"
+     font-family="Inter, 'Segoe UI', system-ui, Arial, sans-serif">
+
+  <rect x="0" y="0" width="640" height="340" fill="#FFFFFF"/>
+
+  <text x="320" y="18" text-anchor="middle" font-size="12.5" font-weight="600" fill="#111827">
+    Three steps to an in-band interrupt, and which register carries each
+  </text>
+
+  <text x="112" y="44" text-anchor="middle" font-size="9.5" font-weight="600"
+        letter-spacing="0.6" fill="#6B7280">1. ENABLE THE SOURCE</text>
+  <text x="320" y="44" text-anchor="middle" font-size="9.5" font-weight="600"
+        letter-spacing="0.6" fill="#6B7280">2. ROUTE IT TO THE IBI</text>
+  <text x="528" y="44" text-anchor="middle" font-size="9.5" font-weight="600"
+        letter-spacing="0.6" fill="#6B7280">3. ENABLE INTERRUPTS</text>
+  <path d="M20 52 L620 52" stroke="#D9E1EE" stroke-width="1"/>
+
+  <defs>
+    <marker id="tip" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#9CA3AF"/>
+    </marker>
+  </defs>
+  <path d="M204 100 L228 100" stroke="#9CA3AF" stroke-width="1.4" marker-end="url(#tip)"/>
+  <path d="M412 100 L436 100" stroke="#9CA3AF" stroke-width="1.4" marker-end="url(#tip)"/>
+
+  <rect x="24" y="72" width="180" height="56" rx="4" fill="#F3F6FB" stroke="#C7D2E4"/>
+  <text x="114" y="92" text-anchor="middle" font-size="10" fill="#111827">
+    ACCEL_CONFIG0 0x1B
+  </text>
+  <text x="114" y="107" text-anchor="middle" font-size="10" fill="#111827">
+    full scale and rate
+  </text>
+  <text x="114" y="121" text-anchor="middle" font-size="10" fill="#111827">
+    PWR_MGMT0 0x10
+  </text>
+
+  <rect x="232" y="72" width="180" height="56" rx="4" fill="#FFF4E5" stroke="#EAD2A8"/>
+  <text x="322" y="97" text-anchor="middle" font-size="10" fill="#111827">
+    INT1_CONFIG0 0x16
+  </text>
+  <text x="322" y="112" text-anchor="middle" font-size="10" fill="#111827">
+    bit 2, data ready
+  </text>
+
+  <rect x="440" y="72" width="176" height="56" rx="4" fill="#EAF3EC" stroke="#B7D8BF"/>
+  <text x="528" y="97" text-anchor="middle" font-size="10" fill="#111827">
+    ENEC with ENINT
+  </text>
+  <text x="528" y="112" text-anchor="middle" font-size="10" fill="#111827">
+    sent by the controller
+  </text>
+
+  <!-- the clear-to-rearm loop -->
+  <path d="M320 136 L320 158 L114 158 L114 140" stroke="#9CA3AF" stroke-width="1.2"
+        fill="none" stroke-dasharray="3 3" marker-end="url(#tip)"/>
+  <rect x="196" y="146" width="248" height="24" rx="4" fill="#FDECEC" stroke="#E9BEBE"/>
+  <text x="320" y="162" text-anchor="middle" font-size="9.5" fill="#7F1D1D">
+    read INT1_STATUS0 0x19 after each interrupt to re-arm
+  </text>
+
+  <path d="M20 190 L620 190" stroke="#D9E1EE" stroke-width="1"/>
+
+  <text x="24" y="210" font-size="9.5" font-weight="600" letter-spacing="0.6"
+        fill="#6B7280">IF NOTHING ARRIVES</text>
+
+  <circle cx="30" cy="228" r="2.6" fill="#B45309"/>
+  <text x="42" y="231" font-size="10" fill="#374151">
+    Step 3 missing: the bus stays silent no matter what the sensor is doing.
+  </text>
+
+  <circle cx="30" cy="247" r="2.6" fill="#B45309"/>
+  <text x="42" y="250" font-size="10" fill="#374151">
+    One interrupt then silence: INT1_STATUS0 is read to clear and has not been read.
+  </text>
+
+  <circle cx="30" cy="266" r="2.6" fill="#B45309"/>
+  <text x="42" y="269" font-size="10" fill="#374151">
+    Declared interrupt payload larger than eight bytes: the controller discards it silently.
+  </text>
+
+  <circle cx="30" cy="285" r="2.6" fill="#B45309"/>
+  <text x="42" y="288" font-size="10" fill="#374151">
+    Bus times out under load: the gyroscope is enabled at its 800 Hz reset rate.
+  </text>
+
+  <path d="M20 306 L620 306" stroke="#D9E1EE" stroke-width="1"/>
+  <text x="24" y="326" font-size="9.5" fill="#6B7280">
+    No interrupt pin is connected. The sensor signals the host on SDA, the same wire that carries the data.
+  </text>
+</svg>

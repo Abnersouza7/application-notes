@@ -1,0 +1,27 @@
+# mask-fingerprint: b918a1960c13
+icm45686  (TDK InvenSense, 6-axis IMU)
+  dynamic address <addr>
+
+  PID 04 6A 00 00 00 11
+    MIPI member id (47:33)       0x0235
+    id type selector (32)        0
+    device id (31:16)            0x0000
+    instance id (15:12)          0b0000
+    reserved (11:0)              0x011
+
+  BCR 0x27
+    device role                      I3C target
+    advanced capabilities (bit 5)    yes
+    virtual target support           no
+    offline capable                  yes
+    IBI mandatory payload            yes
+    IBI capable                      yes
+    max data speed limit             yes
+
+  DCR 0x44
+
+  CHIP_ID register 0x72 reads 0xE9, raw <bytes>
+    chip id field 0xE9, expected 0xE9: match
+
+  register access: 1-byte data, 0 dummy byte(s) before a read payload
+  observable: tilt the board and the accelerometer axes change sign; at rest the magnitude is about 1 g

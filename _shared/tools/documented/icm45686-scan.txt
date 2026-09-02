@@ -1,0 +1,8 @@
+# mask-fingerprint: b918a1960c13
+1 target(s) on the bus at 3300 mV, PUSH_PULL_5_MHZ_50_DC, OPEN_DRAIN_1_MHZ
+
+  dynamic address <addr>
+    PID  04 6A 00 00 00 11   device id 0x0000
+    BCR  0x27   DCR 0x44
+    HDR  claimed   IBI capable
+    profile  icm45686
