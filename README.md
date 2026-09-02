@@ -22,10 +22,10 @@ Every note is published in three places:
 | [AN0005](AN0005-stmicro-mems-over-i3c/) | Interfacing STMicroelectronics MEMS sensors over I3C with the Binho Supernova | 1.0 | [PDF](https://cdn.binho.io/application-notes/AN0005/AN0005.pdf) · [ZIP](https://cdn.binho.io/application-notes/AN0005/AN0005-assets.zip) |
 | [AN0006](AN0006-tdk-mems-over-i3c/) | Interfacing TDK InvenSense MEMS sensors over I3C with the Binho Supernova | 1.0 | [PDF](https://cdn.binho.io/application-notes/AN0006/AN0006.pdf) · [ZIP](https://cdn.binho.io/application-notes/AN0006/AN0006-assets.zip) |
 | [AN0007](AN0007-amsosram-tof-over-i3c/) | Depth imaging with an ams OSRAM time-of-flight sensor over I3C with the Binho Supernova | 1.0 | [PDF](https://cdn.binho.io/application-notes/AN0007/AN0007.pdf) · [ZIP](https://cdn.binho.io/application-notes/AN0007/AN0007-assets.zip) |
-| [AN0008](AN0008-cmis-module-bringup-over-i2c/) | Bringing up a CMIS optical module over I2C with the Binho Supernova | 0.2 | Draft, not published |
-| [AN0009](AN0009-cmis-over-i3c/) | Managing a CMIS optical module over I3C with the Binho Supernova | 0.1 | Draft, not published |
+| [AN0008](AN0008-cmis-module-bringup-over-i2c/) | Bringing up a CMIS optical module over I2C with the Binho Supernova | 0.3 | Draft, not published |
+| [AN0009](AN0009-cmis-over-i3c/) | Managing a CMIS optical module over I3C with the Binho Supernova | 0.2 | Draft, not published |
 | [AN0010](AN0010-cmis-over-spi/) | Bringing up a CMIS optical module over SPI with the Binho Pulsar | 0.2 | Draft, not published |
-| [AN0011](AN0011-cmis-firmware-update-time/) | Measuring CMIS firmware update time with the Binho Supernova | 0.2 | Draft, not published |
+| [AN0011](AN0011-cmis-firmware-update-time/) | Measuring CMIS firmware update time with the Binho Supernova | 0.3 | Draft, not published |
 
 A note at revision 0.x is a draft: it is under internal review, its procedure has not
 yet been run on hardware, and no PDF or assets archive has been built or published.
