@@ -21,6 +21,7 @@ Every note is published in three places:
 | [AN0004](AN0004-evaluating-bosch-mems-over-i3c/) | Interfacing Bosch Sensortec MEMS sensors over I3C with the Binho Supernova | 2.0 | [PDF](https://cdn.binho.io/application-notes/AN0004/AN0004.pdf) · [ZIP](https://cdn.binho.io/application-notes/AN0004/AN0004-assets.zip) |
 | [AN0005](AN0005-stmicro-mems-over-i3c/) | Interfacing STMicroelectronics MEMS sensors over I3C with the Binho Supernova | 1.0 | [PDF](https://cdn.binho.io/application-notes/AN0005/AN0005.pdf) · [ZIP](https://cdn.binho.io/application-notes/AN0005/AN0005-assets.zip) |
 | [AN0006](AN0006-tdk-mems-over-i3c/) | Interfacing TDK InvenSense MEMS sensors over I3C with the Binho Supernova | 1.0 | [PDF](https://cdn.binho.io/application-notes/AN0006/AN0006.pdf) · [ZIP](https://cdn.binho.io/application-notes/AN0006/AN0006-assets.zip) |
+| [AN0007](AN0007-amsosram-tof-over-i3c/) | Depth imaging with an ams OSRAM time-of-flight sensor over I3C with the Binho Supernova | 1.0 | [PDF](https://cdn.binho.io/application-notes/AN0007/AN0007.pdf) · [ZIP](https://cdn.binho.io/application-notes/AN0007/AN0007-assets.zip) |
 
 ## Repository layout
 
