@@ -368,8 +368,7 @@ class SupernovaAdapter(Adapter):
         return bytes(r.get("payload") or b"")
 
     def i2c_scan(self):
-        r = self.call(self.device.i2cControllerScanBus, timeout=10.0)
-        return r.get("addresses") or r.get("payload") or []
+        return _scan_addresses(self.call(self.device.i2cControllerScanBus, timeout=10.0))
 
     # -- I3C, Supernova only ------------------------------------------------
 
@@ -455,8 +454,23 @@ class PulsarAdapter(Adapter):
         return bytes(r.get("payload") or b"")
 
     def i2c_scan(self):
-        r = self.call(self.device.i2cControllerScanBus, self._bus, timeout=10.0)
-        return r.get("addresses") or r.get("payload") or []
+        return _scan_addresses(
+            self.call(self.device.i2cControllerScanBus, self._bus, timeout=10.0))
+
+
+def _scan_addresses(response):
+    """Pull the 7-bit address list out of a bus scan response.
+
+    The key differs between SDK versions and between the two adapter packages:
+    binhosupernova 4.2.0 answers with 'detected_7_bit_addresses'. Guessing wrong
+    here reports a module that is on the bus as absent, so an unrecognised shape
+    raises rather than returning an empty list.
+    """
+    for key in ("detected_7_bit_addresses", "addresses", "payload"):
+        value = response.get(key)
+        if isinstance(value, (list, tuple)):
+            return list(value)
+    raise CmisError(f"no address list in the scan response: {response}")
 
 
 def _nearest_pullup(enum_cls, ohms):
@@ -1001,6 +1015,7 @@ def cmd_ibi(args):
     and it tells the host only that something happened. An I3C in-band interrupt
     carries a mandatory data byte, so the cause can travel with the interrupt.
     """
+    args.transport = "i3c"          # an in-band interrupt is an I3C mechanism
     with open_adapter(args) as adapter:
         mci = I3cMci(adapter, address=args.address)
         mci.assign_address()
@@ -1048,8 +1063,14 @@ def cmd_timing(args):
         rows.append(("page change 00h to 01h to 00h",
                      lambda: [ral.select(0x00, p, verify=False) for p in (0x01, 0x00)],
                      LIMITS_MS["tBPC"] * 2))
-        rows.append(("select CDB page 9Fh",
-                     lambda: ral.select(0x00, CDB_PAGE, verify=False), LIMITS_MS["tBPC"]))
+        def select_cdb():
+            # Clear the cached page first. Ral.select skips the register write when
+            # the page it holds is already the one asked for, so repeating it would
+            # time an empty function rather than a page change.
+            ral.page = None
+            ral.select(0x00, CDB_PAGE, verify=False)
+
+        rows.append(("select CDB page 9Fh", select_cdb, LIMITS_MS["tBPC"]))
 
         print(f"{'phase':<34}{'median':>11}{'max':>11}{'CMIS max':>12}")
         measured = {}
@@ -1141,8 +1162,12 @@ def main(argv=None):
     sub.add_argument("--byte", type=lambda s: int(s, 0), required=True)
     sub.add_argument("--data", required=True, help="hex bytes, for example 'A5' or '01 02'")
 
+    # Do not set a transport default here. With parents=[parent] argparse shares the
+    # same action objects between every subparser, and set_defaults mutates
+    # action.default in place, so a default set on one subcommand silently becomes
+    # the default for all of them. cmd_ibi forces its own transport instead.
     sub = subparsers.add_parser("ibi", parents=[parent], help="count in-band interrupts (I3C)")
-    sub.set_defaults(handler=cmd_ibi, transport="i3c")
+    sub.set_defaults(handler=cmd_ibi)
     sub.add_argument("--seconds", type=float, default=10.0)
     sub.add_argument("--show", type=int, default=5)
 
