@@ -200,12 +200,24 @@ class Ral:
         """Return (computed, stored) for the Page 00h checksum at 00h:222.
 
         94 bytes of module specific content have to agree with a byte the module
-        itself wrote, so this is the one bring-up check that cannot pass by
-        accident on an absent, unpowered or unarmed target.
+        itself wrote. That is the strongest bring-up check available, but on its
+        own it is not proof: a bus that returns the same byte for every read
+        agrees with itself. All 00h is the case that matters, because 00h is also
+        SPIMCI's ACK, so a silent bus produces a byte perfect ACK, 94 zeros, a
+        computed checksum of 00h and a stored checksum of 00h.
+
+        A page that carries one repeated value is rejected here rather than by
+        each caller, because every caller reaches the checksum through this
+        method.
         """
         low, high = CHECKSUM_SPAN
         body = self.read_page(0x00, 0x00, low, high - low)
         stored = self.read_page(0x00, 0x00, CHECKSUM_BYTE, 1)[0]
+        if len(set(body)) == 1 and (sum(body) & 0xFF) == stored:
+            raise CmisError(
+                f"Page 00h read back as {body[0]:#04x} in all {len(body)} bytes, and the "
+                f"stored checksum is {stored:#04x}, so the agreement proves nothing. The "
+                "module is absent, unpowered or unarmed, or the bus is miswired")
         return sum(body) & 0xFF, stored
 
 
@@ -721,6 +733,23 @@ def cmd_selfcheck(args):
     checks += 1
     print("  [OK] FullPageReadSupported raises Nmax, and the 94 byte read fits in one access")
 
+    # A silent bus returns 00h for every byte. That is SPIMCI's ACK, it sums to
+    # 00h, and 00h is what a silent bus also reports as the stored checksum, so
+    # the checksum agrees with itself. Observed on a bench: spi-probe reported
+    # PASS against a board carrying no SPIMCI firmware at all.
+    silent = SimulatedModule()
+    silent.lower[:] = bytes(len(silent.lower))
+    for page in silent.pages.values():
+        page[:] = bytes(len(page))
+    try:
+        Ral(silent).page00_checksum()
+    except CmisError:
+        pass
+    else:
+        raise AssertionError("an all-zero Page 00h was accepted as a valid checksum")
+    checks += 1
+    print("  [OK] an all-zero page is rejected, not read as a checksum that agrees")
+
     try:
         ral.select(0x00, 0x99)
     except CmisError as exc:
@@ -983,7 +1012,10 @@ def cmd_spi_probe(args):
 
     A completed SPIMCI transaction proves nothing on its own. ACK is 00h, so an
     idle bus, an unpowered module or an unarmed target all return a byte perfect
-    ACK followed by zero data. Only the checksum separates them.
+    ACK followed by zero data. The checksum separates them only because
+    Ral.page00_checksum also refuses a page of one repeated value: 94 zeros sum
+    to zero and agree with a stored checksum of zero, which is what a silent bus
+    reports for both.
     """
     with open_adapter(args) as adapter:
         polarities = [args.read_bit] if args.read_bit is not None else [0, 1]
