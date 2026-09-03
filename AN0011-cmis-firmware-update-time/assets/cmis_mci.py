@@ -422,9 +422,16 @@ class SupernovaAdapter(Adapter):
         return bytes(r.get("payload") or b"")
 
     def i3c_enec_ibi(self, address, enable=True):
+        """Enable or disable in-band interrupts on one target.
+
+        The events argument is a LIST of ENEC members. binhosupernova 4.2.0 has
+        no I3cTargetEvents enum, which is what this used to import: the name
+        exists in neither 4.2.0 nor its documentation, so the command raised
+        ImportError before it ever reached the bus.
+        """
         method = self.device.i3cDirectENEC if enable else self.device.i3cDirectDISEC
-        from binhosupernova.commands.i3c.definitions import I3cTargetEvents
-        self.call(method, address, I3cTargetEvents.ENINT)
+        from binhosupernova.commands.i3c.definitions import ENEC
+        self.call(method, address, [ENEC.ENINT])
 
 
 class PulsarAdapter(Adapter):
@@ -876,7 +883,7 @@ def open_mci(adapter, args):
     if args.transport == "i2c":
         return I2cMci(adapter, address=args.address, frequency_hz=args.frequency)
     if args.transport == "i3c":
-        mci = I3cMci(adapter, address=args.address)
+        mci = I3cMci(adapter, address=args.address, push_pull=args.push_pull)
         # An address given on the command line is the operator's decision and
         # must survive bus initialization.
         mci.assign_address(explicit=args.address != CMIS_ADDRESS)
@@ -888,8 +895,11 @@ def open_mci(adapter, args):
 def cmd_scan(args):
     with open_adapter(args) as adapter:
         if args.transport == "i3c":
-            mci = I3cMci(adapter, address=args.address)
-            table = mci.assign_address()
+            mci = I3cMci(adapter, address=args.address, push_pull=args.push_pull)
+            # scan is the command a reader runs to FIND OUT which addresses are
+            # on the bus, so it lists them instead of refusing to choose. The
+            # refusal belongs on the commands that go on to read a target.
+            table = mci.assign_address(explicit=True)
             if not table:
                 print("no I3C targets enumerated")
                 return 1
@@ -1073,8 +1083,10 @@ def cmd_ibi(args):
     """
     args.transport = "i3c"          # an in-band interrupt is an I3C mechanism
     with open_adapter(args) as adapter:
-        mci = I3cMci(adapter, address=args.address)
-        mci.assign_address()
+        mci = I3cMci(adapter, address=args.address, push_pull=args.push_pull)
+        # Same rule as every other command that goes on to talk to one target:
+        # an address given on the command line survives bus initialization.
+        mci.assign_address(explicit=args.address != CMIS_ADDRESS)
         adapter.drain_ibis()
         adapter.i3c_enec_ibi(mci.address, True)
         print(f"ENEC sent to {mci.address:#04x}, listening for {args.seconds:g} s")
@@ -1156,6 +1168,7 @@ def cmd_timing(args):
 SESSION_DEFAULTS = {
     "transport": "i2c", "adapter": None, "serial": None, "address": CMIS_ADDRESS,
     "frequency": 400_000, "verbose": False, "n": None, "read_bit": None, "nmax": None,
+    "push_pull": "PUSH_PULL_12_5_MHZ_50_DC",
 }
 
 
@@ -1171,6 +1184,10 @@ def add_session_options(parser):
                        help="module address (default: 0x50)")
     group.add_argument("--frequency", type=int, default=argparse.SUPPRESS,
                        help="bus clock in Hz (default: 400000 on I2C, 1000000 on SPI)")
+    group.add_argument("--push-pull", default=argparse.SUPPRESS,
+                       help="I3C push-pull rate name (default: PUSH_PULL_12_5_MHZ_50_DC). "
+                            "A target that serves reads from firmware rather than from "
+                            "logic may need a slower one")
     group.add_argument("--n", type=int, default=argparse.SUPPRESS,
                        help="SPIMCI flow control byte count; omit to probe")
     group.add_argument("--read-bit", type=int, choices=(0, 1), default=argparse.SUPPRESS,
