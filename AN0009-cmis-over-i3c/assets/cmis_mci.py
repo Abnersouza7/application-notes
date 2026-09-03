@@ -552,13 +552,35 @@ class I3cMci:
         self.adapter, self.address = adapter, address
         adapter.i3c_init(push_pull, open_drain, drive)
 
-    def assign_address(self):
+    def assign_address(self, explicit=False):
+        """Adopt the dynamic address assigned during bus initialization.
+
+        Taking the first entry of the table is only safe on a bus with one
+        target. A development board usually has more: the FRDM-MCXN947 carries a
+        P3T1755DP on the same I3C bus, and it enumerates first, so a blind
+        table[0] silently reads the temperature sensor and decodes its registers
+        as CMIS. Refuse to guess instead, and say which addresses were seen.
+        """
         table = self.adapter.i3c_init_bus()
-        if table:
-            first = table[0]
-            self.address = (first.get("dynamic_address") if isinstance(first, dict)
-                            else getattr(first, "dynamic_address", self.address))
+        if explicit or not table:
+            return table
+
+        if len(table) > 1:
+            seen = ", ".join(
+                f"{self._entry_address(t):#04x}" for t in table)
+            raise CmisError(
+                f"{len(table)} targets enumerated ({seen}); pass --address to say "
+                "which one is the module, because reading the wrong target still "
+                "returns bytes that decode into something")
+
+        self.address = self._entry_address(table[0]) or self.address
         return table
+
+    @staticmethod
+    def _entry_address(entry):
+        if isinstance(entry, dict):
+            return entry.get("dynamic_address")
+        return getattr(entry, "dynamic_address", None)
 
     def read(self, byte_addr, n):
         return self.adapter.i3c_read(self.address, [byte_addr], n)
@@ -855,7 +877,9 @@ def open_mci(adapter, args):
         return I2cMci(adapter, address=args.address, frequency_hz=args.frequency)
     if args.transport == "i3c":
         mci = I3cMci(adapter, address=args.address)
-        mci.assign_address()
+        # An address given on the command line is the operator's decision and
+        # must survive bus initialization.
+        mci.assign_address(explicit=args.address != CMIS_ADDRESS)
         return mci
     return SpiMci(adapter, n_flow=args.n or 2, read_bit=args.read_bit or 0,
                   frequency_hz=args.frequency if args.frequency != 400_000 else 1_000_000)
