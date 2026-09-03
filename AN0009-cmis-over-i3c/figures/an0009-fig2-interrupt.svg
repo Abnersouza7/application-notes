@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320" width="640" height="320"
+     font-family="Inter, 'Segoe UI', system-ui, Arial, sans-serif">
+
+  <rect x="0" y="0" width="640" height="320" fill="#FFFFFF"/>
+
+  <text x="320" y="18" text-anchor="middle" font-size="12.5" font-weight="600" fill="#111827">
+    Two ways a module tells a host that something happened
+  </text>
+
+  <defs>
+    <marker id="tip" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#9CA3AF"/>
+    </marker>
+    <marker id="tipblue" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#1557F9"/>
+    </marker>
+  </defs>
+
+  <text x="165" y="44" text-anchor="middle" font-size="9.5" font-weight="600"
+        letter-spacing="0.6" fill="#6B7280">CMIS TODAY, MSL SECTION 5.1</text>
+  <text x="475" y="44" text-anchor="middle" font-size="9.5" font-weight="600"
+        letter-spacing="0.6" fill="#1557F9">OVER I3C, IN BAND</text>
+  <path d="M20 52 L620 52" stroke="#D9E1EE" stroke-width="1"/>
+  <path d="M320 60 L320 268" stroke="#D9E1EE" stroke-width="1"/>
+
+  <!-- ============ left: the discrete pin ============ -->
+  <rect x="40" y="66" width="86" height="24" rx="3" fill="#F7F9FC" stroke="#9CA3AF" stroke-width="1.2"/>
+  <text x="83" y="82" text-anchor="middle" font-size="10.5" fill="#111827">Module</text>
+  <rect x="204" y="66" width="86" height="24" rx="3" fill="#F7F9FC" stroke="#9CA3AF" stroke-width="1.2"/>
+  <text x="247" y="82" text-anchor="middle" font-size="10.5" fill="#111827">Host</text>
+  <path d="M83 90 L83 244" stroke="#D9E1EE" stroke-width="1" stroke-dasharray="3 3"/>
+  <path d="M247 90 L247 244" stroke="#D9E1EE" stroke-width="1" stroke-dasharray="3 3"/>
+
+  <text x="165" y="116" text-anchor="middle" font-size="9.5" fill="#6B7280">Interrupt pin asserts</text>
+  <path d="M83 124 L241 124" stroke="#9CA3AF" stroke-width="1.4" marker-end="url(#tip)"/>
+  <text x="165" y="138" text-anchor="middle" font-size="9" fill="#B45309">a required wire, and it carries no cause</text>
+
+  <text x="165" y="166" text-anchor="middle" font-size="9.5" fill="#6B7280">read 00h:4-7</text>
+  <path d="M247 174 L89 174" stroke="#9CA3AF" stroke-width="1.4" marker-end="url(#tip)"/>
+
+  <text x="165" y="200" text-anchor="middle" font-size="9.5" fill="#6B7280">Flags Summary</text>
+  <path d="M83 208 L241 208" stroke="#9CA3AF" stroke-width="1.4" marker-end="url(#tip)"/>
+  <text x="165" y="230" text-anchor="middle" font-size="9" fill="#6B7280">now the host knows why</text>
+
+  <!-- ============ right: the in-band interrupt ============ -->
+  <rect x="350" y="66" width="86" height="24" rx="3" fill="#EEF3FE" stroke="#1557F9" stroke-width="1.2"/>
+  <text x="393" y="82" text-anchor="middle" font-size="10.5" fill="#111827">Target</text>
+  <rect x="514" y="66" width="86" height="24" rx="3" fill="#EEF3FE" stroke="#1557F9" stroke-width="1.2"/>
+  <text x="557" y="82" text-anchor="middle" font-size="10.5" fill="#111827">Host</text>
+  <path d="M393 90 L393 244" stroke="#D9E1EE" stroke-width="1" stroke-dasharray="3 3"/>
+  <path d="M557 90 L557 244" stroke="#D9E1EE" stroke-width="1" stroke-dasharray="3 3"/>
+
+  <text x="475" y="116" text-anchor="middle" font-size="9.5" fill="#6B7280">the target arbitrates for the bus</text>
+  <path d="M393 124 L551 124" stroke="#1557F9" stroke-width="1.4" marker-end="url(#tipblue)"/>
+
+  <rect x="366" y="136" width="218" height="52" rx="3" fill="#EEF3FE" stroke="#1557F9" stroke-width="1.2"/>
+  <text x="475" y="154" text-anchor="middle" font-family="'DejaVu Sans Mono', Consolas, monospace"
+        font-size="11" fill="#111827">header 09h R  ·  MDB 01h</text>
+  <text x="475" y="172" text-anchor="middle" font-size="9.5" fill="#374151">the mandatory data byte carries 00h:4</text>
+  <text x="475" y="210" text-anchor="middle" font-size="9.5" font-weight="600" fill="#1557F9">no interrupt pin connected</text>
+  <text x="475" y="230" text-anchor="middle" font-size="9" fill="#6B7280">the host knows why inside the interrupt</text>
+
+  <!-- ============ footer ============ -->
+  <path d="M20 268 L620 268" stroke="#D9E1EE" stroke-width="1"/>
+  <text x="320" y="288" text-anchor="middle" font-size="10" fill="#374151">
+    One bus event replaces a required pin and the round trip that used to follow it.
+  </text>
+  <text x="320" y="304" text-anchor="middle" font-size="9" fill="#6B7280">
+    Measured in Section 9.2: BCR 26h, MDB 01h, and the same interrupts decoded on the wire.
+  </text>
+</svg>

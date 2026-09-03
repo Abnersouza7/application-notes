@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 296" width="640" height="296"
+     font-family="Inter, 'Segoe UI', system-ui, Arial, sans-serif">
+
+  <rect x="0" y="0" width="640" height="296" fill="#FFFFFF"/>
+
+  <text x="320" y="18" text-anchor="middle" font-size="12.5" font-weight="600" fill="#111827">
+    One eight byte read, and the two rules it tells apart
+  </text>
+
+  <defs>
+    <marker id="tip" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#9CA3AF"/>
+    </marker>
+    <marker id="tipblue" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#1557F9"/>
+    </marker>
+  </defs>
+
+  <text x="120" y="44" text-anchor="middle" font-size="9.5" font-weight="600"
+        letter-spacing="0.6" fill="#6B7280">THE ACCESS</text>
+  <text x="440" y="44" text-anchor="middle" font-size="9.5" font-weight="600"
+        letter-spacing="0.6" fill="#6B7280">WHERE THE LAST FOUR BYTES COME FROM</text>
+  <path d="M20 52 L620 52" stroke="#D9E1EE" stroke-width="1"/>
+
+  <!-- ============ the access ============ -->
+  <rect x="30" y="96" width="180" height="104" rx="3" fill="#F7F9FC" stroke="#9CA3AF" stroke-width="1.2"/>
+  <text x="120" y="120" text-anchor="middle" font-size="11.5" font-weight="600" fill="#111827">read 8 bytes</text>
+  <text x="120" y="138" text-anchor="middle" font-size="10.5" fill="#374151">starting at 00h:124</text>
+  <path d="M46 150 L194 150" stroke="#D9E1EE" stroke-width="1"/>
+  <text x="120" y="168" text-anchor="middle" font-size="9.5" fill="#6B7280">bytes 0 to 3 are 00h:124-127</text>
+  <text x="120" y="184" text-anchor="middle" font-size="9.5" font-weight="600" fill="#B45309">bytes 4 to 7 are in dispute</text>
+
+  <!-- ============ branch: CMIS ============ -->
+  <path d="M210 140 C250 140 250 106 288 106" fill="none" stroke="#1557F9" stroke-width="1.4" marker-end="url(#tipblue)"/>
+  <rect x="292" y="70" width="316" height="82" rx="3" fill="#EEF3FE" stroke="#1557F9" stroke-width="1.2"/>
+  <text x="308" y="92" font-size="11.5" font-weight="600" fill="#111827">CMIS Appendix B.1.2</text>
+  <text x="308" y="110" font-size="10.5" fill="#374151">wraps inside the 128 byte segment, to 00h:0-3</text>
+  <text x="308" y="132" font-family="'DejaVu Sans Mono', Consolas, monospace" font-size="11" fill="#111827">18 53 54 07</text>
+  <rect x="472" y="118" width="122" height="20" rx="10" fill="#FFFFFF" stroke="#1557F9" stroke-width="1"/>
+  <text x="533" y="132" text-anchor="middle" font-size="9" font-weight="600" fill="#1557F9">what this target did</text>
+
+  <!-- ============ branch: AN15071 ============ -->
+  <path d="M210 156 C250 156 250 202 288 202" fill="none" stroke="#9CA3AF" stroke-width="1.4" marker-end="url(#tip)"/>
+  <rect x="292" y="166" width="316" height="72" rx="3" fill="#F7F9FC" stroke="#9CA3AF" stroke-width="1.2"/>
+  <text x="308" y="188" font-size="11.5" font-weight="600" fill="#111827">NXP AN15071 section 2.1.1</text>
+  <text x="308" y="206" font-size="10.5" fill="#374151">runs on into Upper Memory, to Page 00h:128-131</text>
+  <text x="308" y="228" font-family="'DejaVu Sans Mono', Consolas, monospace" font-size="11" fill="#111827">18 42 49 4e</text>
+
+  <!-- ============ the portable answer ============ -->
+  <path d="M20 258 L620 258" stroke="#D9E1EE" stroke-width="1"/>
+  <text x="320" y="278" text-anchor="middle" font-size="10" fill="#B45309">
+    Neither document is wrong about itself. The portable answer is to never let an access cross 7Fh.
+  </text>
+</svg>
