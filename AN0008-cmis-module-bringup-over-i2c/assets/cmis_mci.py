@@ -421,6 +421,30 @@ class SupernovaAdapter(Adapter):
                       list(subaddress), length)
         return bytes(r.get("payload") or b"")
 
+    def i3c_accept_ibi(self, address, accept=True):
+        """Flip the controller's per-target IBI accept flag.
+
+        ENEC arms the TARGET. This arms the CONTROLLER, and it is a separate
+        decision that defaults to REJECT after dynamic address assignment, so
+        without it a correctly behaving target raises interrupts that the
+        adapter silently drops.
+        """
+        from binhosupernova.commands.i3c.definitions import (
+            TargetInterruptRequest, TargetType, ControllerRoleRequest,
+            SetdasaConfiguration, SetaasaConfiguration, EntdaaConfiguration,
+            IBiTimestamp, PendingReadCapability)
+        self.call(self.device.i3cControllerSetTargetDeviceConfiguration, address, {
+            "targetType": TargetType.I3C_DEVICE,
+            "IBIRequest": (TargetInterruptRequest.ACCEPT_IBI if accept
+                           else TargetInterruptRequest.REJECT_IBI),
+            "CRRequest": ControllerRoleRequest.REJECT_CRR,
+            "daaUseSETDASA": SetdasaConfiguration.DO_NOT_USE_SETDASA,
+            "daaUseSETAASA": SetaasaConfiguration.DO_NOT_USE_SETAASA,
+            "daaUseENTDAA": EntdaaConfiguration.USE_ENTDAA,
+            "ibiTimestampEnable": IBiTimestamp.DISABLE_IBIT,
+            "pendingReadCapability": PendingReadCapability.DISABLE_AUTOMATIC_READ,
+        })
+
     def i3c_enec_ibi(self, address, enable=True):
         """Enable or disable in-band interrupts on one target.
 
@@ -1088,8 +1112,13 @@ def cmd_ibi(args):
         # an address given on the command line survives bus initialization.
         mci.assign_address(explicit=args.address != CMIS_ADDRESS)
         adapter.drain_ibis()
+        # Both halves, in this order. The controller defaults to rejecting IBIs
+        # from a target it has just enumerated, so arming only the target gives
+        # a silent bus and no error anywhere.
+        adapter.i3c_accept_ibi(mci.address, True)
         adapter.i3c_enec_ibi(mci.address, True)
-        print(f"ENEC sent to {mci.address:#04x}, listening for {args.seconds:g} s")
+        print(f"accept flag set and ENEC sent to {mci.address:#04x}, "
+              f"listening for {args.seconds:g} s")
         deadline, seen = time.time() + args.seconds, []
         while time.time() < deadline:
             event = adapter.wait_ibi(timeout=min(0.5, args.seconds))
